@@ -39,6 +39,7 @@ target_sources(
     src/effect-flame.c
     src/effect-rainbow.c
     src/effect-neon.c
+    src/effect-bloom.c
 )
 
 if(WIN32)

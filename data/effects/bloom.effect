@@ -1,0 +1,111 @@
+/* Bloom — makes the glyph glow as a solid, luminous shape.
+ *
+ * Unlike the neon tube (which lives only on the contour and leaves the
+ * interior hollow), bloom fills the whole glyph: the text body is rendered
+ * solid in the chosen color, its thick interior is whitened into a hot core,
+ * and a soft halo radiates outward over `radius` pixels.
+ *
+ * We reuse the contour-distance trick from neon: softly blurring the coverage
+ * mask with a golden-angle disc yields a field that is ~1 deep inside the
+ * glyph, ~0.5 on the contour, and decays to 0 across `radius` outside it. That
+ * single field drives both the outward halo and the interior core-whitening.
+ *
+ * The bloom strength is modulated by a host-supplied random `pulse` (slow,
+ * irregular ebb and flow) and a small per-pixel `shimmer` (a low-frequency
+ * spatial wobble) for a living, wavering glow. Output is premultiplied so the
+ * host composites it additively (ONE, INVSRCALPHA) for a luminous look. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;    /* GS_R8 coverage mask; .r = text coverage   */
+
+uniform float2 canvas;      /* mask size in pixels (uv <-> px conversion) */
+uniform float4 bloom_color; /* fill/glow tint (alpha scales overall)      */
+uniform float  radius;      /* bloom halo spread in pixels                */
+uniform float  intensity;   /* overall luminance multiplier               */
+uniform float  pulse;       /* random strength multiplier (from host)     */
+uniform float  shimmer;     /* spatial shimmer amount, 0..1               */
+uniform float  time;
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float sample_cov(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSBloom(VertData v) : TARGET
+{
+	float r = max(radius, 1.0);
+
+	/* Golden-angle ("sunflower") disc: uniform area coverage with a Gaussian
+	 * weight, i.e. a smooth blur of the coverage mask. */
+	const int   N  = 24;
+	const float GA = 2.39996323;  /* golden angle (radians) */
+	float field = 0.0;
+	float wsum  = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);          /* 0..1, area-uniform   */
+		float a  = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * r);
+		float  w = exp(-rr * rr * 2.0);          /* Gaussian falloff     */
+		field += sample_cov(v.uv + off / canvas) * w;
+		wsum  += w;
+	}
+	field /= wsum;
+
+	/* Crisp coverage = the solid glyph body. */
+	float cov = sample_cov(v.uv);
+
+	/* Soft halo: `field` is 1 inside, ~0.5 at the contour, fading to 0 across
+	 * `radius` outside. Squaring tightens it into a pleasant glow falloff. */
+	float halo = field * field;
+
+	/* Slight wavering: a low-frequency spatial wobble that drifts with time.
+	 * `shimmer` keeps it subtle (max ~+/-15%). */
+	float wob = sin(v.uv.x * 7.0 + time * 1.3) *
+		    sin(v.uv.y * 6.0 - time * 1.1);
+	float shimmer_mult = 1.0 + 0.15 * shimmer * wob;
+
+	/* Hot core: thick interiors (field near 1) push toward white. */
+	float whiteness = smoothstep(0.55, 1.0, field);
+	float3 col = lerp(bloom_color.rgb, float3(1.0, 1.0, 1.0),
+			  whiteness * 0.85);
+
+	float strength = intensity * pulse * shimmer_mult;
+
+	/* Solid body plus outward halo, all scaled by the live strength. */
+	float emit = (cov * 1.0 + halo) * strength;
+	emit = max(emit, 0.0);
+
+	float alpha = saturate(cov + halo * 0.7) * bloom_color.a;
+
+	/* Premultiplied: rgb may exceed alpha so bright cores add light. */
+	return float4(col * emit, alpha);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSBloom(v);
+	}
+}
