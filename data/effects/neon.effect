@@ -1,0 +1,113 @@
+/* Neon tube — traces the glyph contour as a glowing neon tube.
+ *
+ * The text coverage mask is a filled shape; a neon tube lives on its *contour*
+ * (the coverage == 0.5 iso-line). We approximate the distance to that contour
+ * by softly blurring the coverage with a golden-angle disc of taps, then read
+ * the blurred value as a signed band around the contour. From that distance we
+ * build three lobes that are added together:
+ *
+ *   - tube  : a flat-ish body whose width is `tube_width` pixels.
+ *   - core  : a crisp white-hot filament on the exact contour (analytic AA).
+ *   - glow  : a soft halo that falls off over `glow_radius` pixels (the bloom).
+ *
+ * The glyph interior (coverage ~1) and the far exterior (coverage ~0) both map
+ * to band ~0, so they stay hollow/transparent. Output is premultiplied so the
+ * host can composite it additively (ONE, INVSRCALPHA) for a luminous look. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = text coverage   */
+
+uniform float2 canvas;       /* mask size in pixels (uv <-> px conversion) */
+uniform float4 neon_color;   /* tube/glow tint (alpha scales overall)      */
+uniform float  tube_width;   /* tube half-width in pixels                  */
+uniform float  glow_radius;  /* bloom spread in pixels                     */
+uniform float  bloom;        /* bloom (halo) strength                      */
+uniform float  brightness;   /* overall luminance multiplier               */
+uniform float  flicker;      /* per-frame flicker multiplier (from host)   */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float sample_cov(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSNeon(VertData v) : TARGET
+{
+	/* Sampling radius spans both the tube body and the glow halo so a single
+	 * blurred field can drive both. */
+	float radius = max(tube_width + glow_radius, 1.0);
+
+	/* Golden-angle ("sunflower") disc: uniform area coverage with a Gaussian
+	 * weight so the result is a smooth blur of the coverage mask. */
+	const int   N  = 24;
+	const float GA = 2.39996323;  /* golden angle (radians) */
+	float blurred = 0.0;
+	float wsum    = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);          /* 0..1, area-uniform   */
+		float a  = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * radius);
+		float  w = exp(-rr * rr * 2.0);          /* Gaussian falloff     */
+		blurred += sample_cov(v.uv + off / canvas) * w;
+		wsum    += w;
+	}
+	blurred /= wsum;
+
+	/* `band` peaks at the contour (blurred == 0.5) and decays toward 0 deep
+	 * inside / outside. Treated as a linear ramp it yields a distance in px. */
+	float band = saturate(1.0 - 2.0 * abs(blurred - 0.5));
+	float dist = (1.0 - band) * radius;          /* ~pixels from contour */
+
+	/* Tube body: full strength within tube_width, ~1px soft edge. */
+	float tube = 1.0 - smoothstep(tube_width - 1.0, tube_width + 1.0, dist);
+
+	/* Crisp white-hot filament on the exact contour via analytic AA. */
+	float c   = sample_cov(v.uv);
+	float fw  = max(fwidth(c), 1e-4);
+	float core = 1.0 - smoothstep(0.0, fw * 2.0, abs(c - 0.5));
+
+	/* Soft halo (bloom). Derived from `band` (not from `dist`) so it is
+	 * exactly 0 deep inside *and* outside the disc — that keeps thick glyph
+	 * interiors hollow. `band` already spans glow_radius beyond the tube. */
+	float glow = band * band * bloom;
+
+	/* White-hot core, colored glow: push the brightest parts toward white. */
+	float whiteness = saturate(core * 1.0 + tube * 0.35);
+	float3 col = lerp(neon_color.rgb, float3(1.0, 1.0, 1.0), whiteness * 0.85);
+
+	float intensity = (tube * 0.9 + core * 1.3 + glow) * brightness * flicker;
+	intensity = max(intensity, 0.0);
+
+	float alpha = saturate(tube * 0.9 + core + glow * 0.6) * neon_color.a;
+
+	/* Premultiplied: rgb may exceed alpha so bright cores add light. */
+	return float4(col * intensity, alpha);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSNeon(v);
+	}
+}
