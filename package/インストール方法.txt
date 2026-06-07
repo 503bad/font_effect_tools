@@ -50,7 +50,7 @@ Font Effect Tools (Flame Text Source) — OBS プラグイン 導入手順
 ■ 使い方
 
   1. OBS を再起動する
-  2. 「ソース」→「＋」→「炎テキスト」(英語表示なら "Flame Text") を追加
+  2. 「ソース」→「＋」→「Font Effect Tools」を追加
   3. プロパティでテキスト・フォント・炎/火の粉のパラメータを調整
 
 
