@@ -42,6 +42,7 @@ target_sources(
     src/effect-bloom.c
     src/effect-water.c
     src/effect-glitch.c
+    src/effect-watersurface.c
 )
 
 if(WIN32)

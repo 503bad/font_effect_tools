@@ -1,0 +1,145 @@
+/* Water surface — draws the text upright and, below the waterline, a flipped
+ * reflection on a rippling water surface.
+ *
+ * Everything funnels through coverage_at(uv): for pixels at or above the
+ * waterline it returns the plain text coverage; for pixels below it mirrors
+ * the uv around the waterline, distorts it with ripples (either a side-to-side
+ * sway or concentric rings spreading from the centre), samples the text, and
+ * fades the result with depth. Because both the crisp body sample and the
+ * golden-angle bloom disc call coverage_at, the glow and bloom automatically
+ * follow the reflection and bleed naturally across the waterline.
+ *
+ * Output is premultiplied so the host composites it additively
+ * (ONE, INVSRCALPHA) for a luminous look. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;    /* GS_R8 coverage mask; .r = text coverage */
+
+uniform float2 canvas;        /* mask size in pixels (uv <-> px conversion) */
+uniform float4 font_color;    /* fill/glow tint (alpha scales overall)      */
+uniform float  waterline;     /* uv y of the water surface (text bottom)    */
+uniform float  band;          /* text height in uv (reflection extent)      */
+uniform float  wave_mode;     /* 0 = horizontal sway, 1 = concentric rings  */
+uniform float  wave_strength; /* ripple amplitude, 0..1                     */
+uniform float  wave_freq;     /* ripple cycles across the reflection        */
+uniform float  wave_speed;    /* ripple animation speed                     */
+uniform float  wave_random;   /* irregularity of the ripples, 0..1          */
+uniform float  reflect;       /* reflection opacity at the waterline        */
+uniform float  fade;          /* how strongly it fades with depth, 0..1     */
+uniform float  glow;          /* body emission multiplier                   */
+uniform float  bloom;         /* outward halo multiplier                    */
+uniform float  radius;        /* bloom halo spread in pixels                */
+uniform float  time;
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+/* Effective text coverage at a canvas uv, accounting for the flipped, rippled,
+ * depth-faded reflection below the waterline. */
+float coverage_at(float2 uv)
+{
+	/* At or above the surface: plain upright text (blank in the padding). */
+	if (uv.y <= waterline)
+		return image.Sample(maskSampler, uv).r;
+
+	float depth  = uv.y - waterline;                 /* uv units below surface */
+	float depthN = saturate(depth / max(band, 1e-4)); /* 0 surface .. 1 far     */
+
+	float reflH  = max(band * canvas.y, 1.0);        /* reflection height (px) */
+	/* Amplitude grows with depth; only a faint ripple right at the surface. */
+	float amp_px = wave_strength * reflH * 0.12 * (0.15 + 0.85 * depthN);
+
+	float t = time * wave_speed * 2.0;
+	float2 ruv = float2(uv.x, waterline - depth);    /* vertical mirror        */
+
+	if (wave_mode < 0.5) {
+		/* Horizontal sway: the reflection drifts side to side, stronger
+		 * deeper down. Two octaves plus an x-dependent jitter (scaled by
+		 * wave_random) keep it from looking mechanically regular. */
+		float ph = depthN * wave_freq * 6.2831853;
+		float w  = sin(ph + t) + 0.5 * sin(ph * 2.13 + t * 1.37 + 1.7);
+		float jit = sin(uv.x * 11.0 + depthN * 17.0 + t * 1.9);
+		w = lerp(w, w * 0.6 + jit * 0.8, wave_random);
+		ruv.x = uv.x + (w * amp_px) / canvas.x;
+	} else {
+		/* Concentric rings radiating from the centre of the surface. */
+		float2 cpx  = float2(0.5 * canvas.x, waterline * canvas.y);
+		float2 dpx  = uv * canvas - cpx;
+		float  dist = length(dpx);
+		float  ph   = dist / reflH * wave_freq * 6.2831853;
+		float  ring = sin(ph - t);
+		float  jit  = sin(ph * 2.3 + t * 2.1);
+		ring = lerp(ring, ring * 0.6 + jit * 0.6, wave_random);
+		float2 dir = dist > 1e-3 ? dpx / dist : float2(0.0, 0.0);
+		ruv += (dir * ring * amp_px) / canvas;        /* radial displacement */
+	}
+
+	float cov = image.Sample(maskSampler, ruv).r;
+
+	/* Fade with depth: opacity = reflect at the surface, decaying downward. */
+	float f = reflect * exp(-depthN * (0.5 + fade * 5.0));
+	return cov * f;
+}
+
+float4 PSWater(VertData v) : TARGET
+{
+	float r = max(radius, 1.0);
+
+	/* Golden-angle ("sunflower") disc: a smooth, area-uniform blur of the
+	 * (already reflection-aware) coverage, used for the glow halo. */
+	const int   N  = 24;
+	const float GA = 2.39996323;  /* golden angle (radians) */
+	float field = 0.0;
+	float wsum  = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);
+		float a  = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * r);
+		float  w = exp(-rr * rr * 2.0);
+		field += coverage_at(v.uv + off / canvas) * w;
+		wsum  += w;
+	}
+	field /= wsum;
+
+	float cov  = coverage_at(v.uv);
+	float halo = field * field;
+
+	/* Hot core: thick interiors push toward white, but only when glowing. */
+	float whiteness = smoothstep(0.55, 1.0, field) * saturate(glow);
+	float3 col = lerp(font_color.rgb, float3(1.0, 1.0, 1.0), whiteness * 0.85);
+
+	/* Solid body (brightened by glow) plus the outward bloom halo. */
+	float emit = cov * (1.0 + glow) + halo * bloom;
+	emit = max(emit, 0.0);
+
+	float alpha = saturate(cov + halo * 0.6 * bloom) * font_color.a;
+
+	/* Premultiplied: rgb may exceed alpha so bright cores add light. */
+	return float4(col * emit, alpha);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSWater(v);
+	}
+}
