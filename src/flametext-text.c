@@ -87,7 +87,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    const char *font_path,
 					    uint32_t pixel_size,
 					    bool bold,
-					    bool italic)
+					    bool italic,
+					    uint32_t bottom_pad)
 {
 	if (!utf8_text || !utf8_text[0] || !font_path || !font_path[0] ||
 	    pixel_size == 0)
@@ -182,10 +183,13 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	}
 
 	/* Padding generous enough for the flame to rise and sparks to travel.
-	 * Top gets the most room; sides and bottom are modest. */
+	 * Top gets the most room; sides are modest. The bottom room is chosen
+	 * by the caller (effects that drip downward ask for more); fall back to
+	 * a small default. */
 	const int pad_x = (int)(pixel_size * 0.8f);
 	const int pad_top = (int)(pixel_size * 2.4f);
-	const int pad_bottom = (int)(pixel_size * 0.6f);
+	const int pad_bottom = bottom_pad > 0 ? (int)bottom_pad
+					      : (int)(pixel_size * 0.6f);
 
 	int text_w = (int)(pen_x + 0.5f);
 	int text_h = max_bottom - min_top;
@@ -206,12 +210,28 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	}
 	bfree(tmp);
 
+	/* Bottom contour: lowest inked pixel per column (-1 = empty column).
+	 * "Inked" uses a low coverage threshold so faint antialiased edges do
+	 * not register as drip-worthy tips. */
+	int *bottom_y = bmalloc(sizeof(int) * (size_t)cw);
+	for (int x = 0; x < cw; ++x) {
+		int lowest = -1;
+		for (int y = ch - 1; y >= 0; --y) {
+			if (canvas[(size_t)y * cw + x] >= 40) {
+				lowest = y;
+				break;
+			}
+		}
+		bottom_y[x] = lowest;
+	}
+
 	const uint8_t *data_ptrs[1] = {(const uint8_t *)canvas};
 	gs_texture_t *tex = gs_texture_create((uint32_t)cw, (uint32_t)ch,
 					      GS_R8, 1, data_ptrs, 0);
 	bfree(canvas);
 	if (!tex) {
 		obs_log(LOG_ERROR, "gs_texture_create failed for text mask");
+		bfree(bottom_y);
 		return NULL;
 	}
 
@@ -223,6 +243,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	m->text_right = (float)(pad_x + text_w);
 	m->text_top = (float)pad_top;
 	m->text_bottom = (float)(pad_top + text_h);
+	m->bottom_y = bottom_y;
 	return m;
 }
 
@@ -232,5 +253,6 @@ void flametext_mask_free(struct flametext_mask *mask)
 		return;
 	if (mask->tex)
 		gs_texture_destroy(mask->tex);
+	bfree(mask->bottom_y);
 	bfree(mask);
 }

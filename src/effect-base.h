@@ -43,6 +43,13 @@ struct text_effect {
 	/* Pull this effect's own parameters out of `settings`. */
 	void  (*update)(void *state, obs_data_t *settings);
 
+	/* How much empty room (in pixels) this effect wants reserved below the
+	 * text on the shared canvas, given the current font pixel size. Called
+	 * after update(), so it may depend on settings. Return 0 (or leave NULL)
+	 * for the host default. The water drip effect uses this to make room for
+	 * drops to fall the requested distance. */
+	uint32_t (*wanted_bottom_pad)(void *state, uint32_t font_size);
+
 	/* The shared text mask was (re)built; refresh anything derived from
 	 * its geometry (emitter bands, etc.). `mask` may be NULL. */
 	void  (*set_mask)(void *state, const struct flametext_mask *mask);

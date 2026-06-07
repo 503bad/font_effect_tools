@@ -1,0 +1,116 @@
+/* Font Effect Tools — water drip.
+ *
+ * Two jobs share this file:
+ *   technique DrawText — fills the glyph coverage mask with a flat font color
+ *     (the water effect still has to draw the letters underneath the drops).
+ *   technique Draw     — the drop sprites. Two kinds of camera-facing quads:
+ *       kind 0: the wet trail a drop leaves behind (a soft vertical tube,
+ *         brighter toward the falling head and fading toward the origin tip).
+ *       kind 1: the drop head, a rounded translucent droplet with a brighter
+ *         refractive rim and a small specular highlight (glassy look).
+ *     TEXCOORD0 = corner uv, TEXCOORD1 = (alpha, kind). Straight alpha blended
+ *     so the water reads as translucent glass rather than glowing light. */
+
+uniform float4x4 ViewProj;
+uniform float4 water_color;   /* rgb tint, a = overall opacity scale  */
+uniform texture2d image;      /* GS_R8 coverage mask; .r = text coverage */
+uniform float4 font_color;    /* flat color the glyphs are filled with */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+/* ----- drop sprites ----- */
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;  /* corner 0..1                 */
+	float2 dat : TEXCOORD1;  /* x = alpha, y = kind (0/1)   */
+};
+
+VertData VSParticles(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	o.dat = v.dat;
+	return o;
+}
+
+float4 PSWater(VertData v) : TARGET
+{
+	float alpha = saturate(v.dat.x);
+	float3 base = water_color.rgb;
+
+	if (v.dat.y < 0.5) {
+		/* --- wet trail --- */
+		float across = abs(v.uv.x - 0.5) * 2.0;     /* 0 center .. 1 edge */
+		float tube = saturate(1.0 - across * across);
+		float along = 0.15 + 0.85 * v.uv.y;          /* faint top .. head  */
+
+		/* A slim off-center glint suggesting a wet, reflective streak. */
+		float gx = (v.uv.x - 0.42) / 0.12;
+		float glint = exp(-gx * gx) * 0.35;
+
+		float a = tube * along * alpha;
+		float3 col = base + glint;
+		return float4(col, a * water_color.a);
+	}
+
+	/* --- drop head (round, glassy) --- */
+	float2 d = v.uv - 0.5;
+	float r = length(d) * 2.0;                      /* 0 center .. ~1 edge */
+	float body = 1.0 - smoothstep(0.85, 1.0, r);
+	float rim = smoothstep(0.45, 0.95, r) * body;   /* brighter refractive edge */
+
+	/* Specular highlight, upper-left of the droplet. */
+	float2 hl = v.uv - float2(0.36, 0.30);
+	float spec = saturate(1.0 - length(hl) * 4.5);
+	spec = spec * spec * spec;
+
+	/* Translucent core, more opaque rim, plus the bright highlight. */
+	float a = body * alpha * (0.32 + 0.55 * rim) + spec * alpha * 0.9;
+	float3 col = base * (0.8 + 0.5 * rim) + spec;
+	return float4(col, saturate(a) * water_color.a);
+}
+
+/* ----- glyph fill ----- */
+
+struct VertTex {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertTex VSText(VertTex v)
+{
+	VertTex o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSText(VertTex v) : TARGET
+{
+	float cov = image.Sample(maskSampler, v.uv).r;
+	return float4(font_color.rgb, cov * font_color.a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSParticles(v);
+		pixel_shader  = PSWater(v);
+	}
+}
+
+technique DrawText
+{
+	pass
+	{
+		vertex_shader = VSText(v);
+		pixel_shader  = PSText(v);
+	}
+}

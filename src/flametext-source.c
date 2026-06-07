@@ -38,6 +38,13 @@ static void group_key(const struct text_effect *e, char *buf, size_t n)
 
 static void rebuild_mask(struct flametext_source *s)
 {
+	/* Reserve extra room below the text when the active effect wants it
+	 * (e.g. water drips need somewhere to fall). */
+	const struct text_effect *active = fx_registry(NULL)[s->active];
+	uint32_t bottom_pad = active->wanted_bottom_pad
+		? active->wanted_bottom_pad(s->states[s->active], s->font_size)
+		: 0u;
+
 	obs_enter_graphics();
 	if (s->mask) {
 		flametext_mask_free(s->mask);
@@ -45,7 +52,8 @@ static void rebuild_mask(struct flametext_source *s)
 	}
 	if (s->text && s->text[0] && s->font_path[0]) {
 		s->mask = flametext_mask_build(s->text, s->font_path,
-					       s->font_size, s->bold, s->italic);
+					       s->font_size, s->bold, s->italic,
+					       bottom_pad);
 	}
 	obs_leave_graphics();
 

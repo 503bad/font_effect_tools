@@ -33,6 +33,12 @@ struct flametext_mask {
 	float text_right;
 	float text_top;     /* topmost text pixel (small y) */
 	float text_bottom;  /* lowest text pixel (large y) */
+
+	/* Per-column bottom contour: for each canvas column x, the y of the
+	 * lowest inked pixel in that column, or -1 where the column is empty.
+	 * Length == `width`. Lets effects find the genuine lower tips of the
+	 * glyphs (and avoid emitting from blank gaps). Owned by the mask. */
+	int *bottom_y;
 };
 
 /* Rasterize utf-8 text with the given font file at the given pixel size into
@@ -42,13 +48,18 @@ struct flametext_mask {
  * gs_texture_create runs inside this function, so it MUST be called while
  * holding the OBS graphics lock (obs_enter_graphics()).
  *
+ * `bottom_pad` is the empty room (in pixels) reserved below the text; pass 0
+ * to use a small default. Effects that need drops/embers to travel downward
+ * ask for a larger value.
+ *
  * Returns NULL on failure. The caller owns the result and frees it with
  * flametext_mask_free (also under the graphics lock). */
 struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    const char *font_path,
 					    uint32_t pixel_size,
 					    bool bold,
-					    bool italic);
+					    bool italic,
+					    uint32_t bottom_pad);
 
 /* Free a mask. Must be called while holding the OBS graphics lock. */
 void flametext_mask_free(struct flametext_mask *mask);
