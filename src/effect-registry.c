@@ -9,6 +9,7 @@ extern const struct text_effect fx_rainbow;
 extern const struct text_effect fx_neon;
 extern const struct text_effect fx_bloom;
 extern const struct text_effect fx_water;
+extern const struct text_effect fx_glitch;
 
 static const struct text_effect *const k_effects[] = {
 	&fx_flame,
@@ -16,6 +17,7 @@ static const struct text_effect *const k_effects[] = {
 	&fx_neon,
 	&fx_bloom,
 	&fx_water,
+	&fx_glitch,
 };
 
 const struct text_effect *const *fx_registry(size_t *count)

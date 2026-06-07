@@ -41,6 +41,7 @@ target_sources(
     src/effect-neon.c
     src/effect-bloom.c
     src/effect-water.c
+    src/effect-glitch.c
 )
 
 if(WIN32)
