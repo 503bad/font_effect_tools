@@ -1,105 +1,173 @@
-# Font Effect Tools (OBS source plugin)
+# Font Effect Tools（OBS ソースプラグイン）
 
-An OBS Studio **input source** that renders user text as a living flame and
-emits glowing spark particles that overshoot the glyphs. Built on the
-`obs-plugintemplate` toolchain and FreeType, reusing the font handling proven
-in the sibling `dokavendor` plugin.
+入力したテキストにさまざまな**エフェクト**を適用して表示する OBS Studio の
+**入力ソース**です。エフェクトは複数の中から選択でき、エフェクトごとに専用の
+パラメーターを持ちます。テキストとフォントの設定はエフェクトの種類を横断して
+共有されます。
 
-In OBS the source appears in **Add Source → "Font Effect Tools"** (internal id
-`flame_text_source`).
+`obs-plugintemplate` のツールチェインと FreeType をベースにしており、フォント
+処理は姉妹プラグイン `dokavendor` の実績ある実装を流用しています。
 
-## What it does
+OBS では **ソースの追加 →「Font Effect Tools」** に表示されます（内部 id は
+`flame_text_source`）。
 
-- Renders any text string in a system font (chosen via OBS's font picker).
-- Draws the text shape as **fire** with a GPU fragment shader: FBM-noise
-  turbulence scrolls upward over time, with a white/yellow hot base fading to
-  red and smoky tips. It always shimmers (driven by a `time` uniform).
-- Emits **spark particles** from the text, either off the **top** or the
-  **bottom** edge (selectable). Particles are simulated on the CPU (no compute
-  shaders / GPGPU) and drawn additively with a soft **bloom** glow.
-- Uses a padded canvas so flame and sparks can spill outside the glyph bounds —
-  the reason this is a *source* and not a *filter*.
+## できること
 
-## Architecture
+- 任意のテキストを、システムフォント（OBS のフォントピッカーで選択）で描画します。
+- **エフェクト選択ドロップダウン**で表示効果を切り替えます。現在は次の 2 種類:
+  - **炎 (Flame)** — テキストの形を GPU シェーダーで炎として描画。FBM ノイズの
+    乱流が時間とともに上方向へスクロールし、白〜黄の熱い根元から赤・煙状の先端
+    へと変化します。さらに **火の粉パーティクル**（CPU シミュレーション）を
+    テキストの上端または下端から放出し、加算合成の **ブルーム** で発光させます。
+  - **レインボー (Rainbow)** — テキストの形を、時間で流れる虹色グラデーションで
+    塗りつぶします。角度・色数・速度・彩度・明度を調整できます。
+- グリフの外側まで効果がはみ出せるよう、余白を持たせたキャンバスに描画します
+  （フィルタではなく*ソース*である理由）。
+- テキスト/フォントは全エフェクト共通。エフェクトを切り替えても各エフェクトの
+  パラメーターはインスタンスごとに保持されます。
 
-| File | Role |
+## アーキテクチャ
+
+エフェクトは「インターフェース（関数ポインタの構造体）＋レジストリ」で
+差し替え可能な構造になっています。ホスト（ソース本体）は共有のテキスト/
+フォント/マスク生成と、選択中エフェクトへの委譲だけを担当します。
+
+| ファイル | 役割 |
 | --- | --- |
-| `src/plugin-main.c` | Module entry, registers the source |
-| `src/flametext-source.c/.h` | Source lifecycle, properties UI, render loop |
-| `src/flametext-text.c/.h` | FreeType → single padded coverage-mask texture |
-| `src/flametext-particles.c/.h` | CPU spark pool (struct array), additive draw |
-| `src/flametext-font-resolve-win.c` | Font face name → file path (Windows) |
-| `data/effects/flame.effect` | Rising-flame fragment shader |
-| `data/effects/spark.effect` | Additive ember sprite shader (with bloom) |
+| `src/plugin-main.c` | モジュールのエントリ。ソースを登録 |
+| `src/flametext-source.c/.h` | ホスト。共有テキスト/フォント/マスク、エフェクト選択、プロパティ UI、描画ループ |
+| `src/effect-base.h` | エフェクトのインターフェース（`text_effect` 構造体、`fx_render_ctx`） |
+| `src/effect-registry.c/.h` | 利用可能なエフェクトの一覧（レジストリ） |
+| `src/effect-flame.c/.h` | 炎エフェクト（炎シェーダー＋火の粉パーティクル） |
+| `src/effect-rainbow.c/.h` | レインボーエフェクト（グラデーション塗り） |
+| `src/flametext-text.c/.h` | FreeType → 余白付きの単一カバレッジマスクテクスチャ |
+| `src/flametext-particles.c/.h` | CPU 火の粉プール（構造体配列）と加算描画 |
+| `src/flametext-font-resolve-win.c` | フォント名 → ファイルパス解決（Windows） |
+| `data/effects/flame.effect` | 上昇する炎のフラグメントシェーダー |
+| `data/effects/spark.effect` | 加算合成の火の粉スプライトシェーダー（ブルーム付き） |
+| `data/effects/rainbow.effect` | 虹色グラデーション塗りのシェーダー |
 
-### Text rendering approach
+### エフェクトのインターフェース
 
-`dokavendor` already ships a working **FreeType** integration plus a Windows
-font-name → path resolver, so this plugin reuses that: full FreeType
-rasterization with system fonts. No separate text engine is bundled beyond
-FreeType.
+各エフェクトは `text_effect`（`src/effect-base.h`）を実装します。主なコール
+バック:
 
-The difference from `dokavendor`: instead of per-glyph colored quads, the text
-is baked into **one grayscale coverage mask** (`GS_R8`) sized to the padded
-canvas. The flame shader samples that mask as its fuel source, and the spark
-emitter reads the mask's text band (top or bottom) for emission positions.
+- `create` / `destroy` — インスタンスごとの状態の確保・解放
+- `load_graphics` — シェーダー等の GPU リソース読み込み
+- `update` — 自分のパラメーターを設定値から読み出す
+- `set_mask` — 共有テキストマスクが再生成されたときの追従（放出位置など）
+- `tick` — シミュレーションの時間進行
+- `render` — 1 フレームの描画
+- `reset` — `show()` 時などの一時状態リセット
+- `get_properties` / `get_defaults` — 自分のプロパティと既定値
 
-## Render pipeline (per frame)
+スレッド契約: `load_graphics` / `render` / `destroy` は OBS のグラフィックス
+ロック保持下で、それ以外はロック無しで呼ばれます（不要なコールバックは NULL 可）。
 
-1. `flametext-text` builds the coverage mask on settings change (under the
-   graphics lock). The text sits low in the canvas, leaving ~2.4× font-size of
-   headroom above for flame and sparks.
-2. `video_tick(dt)` advances the flame clock and steps the particle simulation
-   (delta-time based, frame-rate independent).
-3. `video_render`:
-   - Flame pass: full-canvas sprite with `flame.effect` (alpha blend).
-   - Spark pass: one batched `gs_render_start` draw of all live embers with
-     `spark.effect` (additive blend). Per-particle `(heat, brightness)` is
-     carried in `TEXCOORD1`; the shader's hot core + wide halo produces bloom.
+### テキスト描画の方式
 
-## Properties
+`dokavendor` の **FreeType** 統合と Windows のフォント名→パス解決を流用し、
+システムフォントによるフルラスタライズを行います。テキストは余白付きキャンバス
+に **1 枚のグレースケールカバレッジマスク**（`GS_R8`）として焼き込まれ、各
+エフェクトはこのマスクを共通の入力（＝テキスト入力）として使用します。炎
+エフェクトはこのマスクを燃料として参照し、火の粉エミッターはマスクのテキスト
+帯（上端/下端）から放出位置を読み取ります。
 
-| Property | Range | Default |
+## 描画パイプライン（1 フレーム）
+
+1. 設定変更時に `flametext-text` がカバレッジマスクを生成（グラフィックスロック
+   下）。テキストはキャンバス下方に配置され、上方にフォントサイズの約 2.4 倍の
+   余白を確保します。生成後、全エフェクトの `set_mask` に通知します。
+2. `video_tick(dt)` でホストのクロックを進め、**選択中エフェクト**の `tick` を
+   呼びます（デルタタイム駆動でフレームレート非依存）。
+3. `video_render` で**選択中エフェクト**の `render` を呼びます。
+   - 炎: キャンバス全面に `flame.effect`（アルファ合成）＋ 火の粉を `spark.effect`
+     で一括加算描画。粒子ごとの `(heat, brightness)` は `TEXCOORD1` で渡し、
+     シェーダーのホットコア＋広いハローでブルームを生成します。
+   - レインボー: キャンバス全面に `rainbow.effect`（アルファ合成）。
+
+## プロパティ
+
+### 共通
+
+| プロパティ | 範囲 | 既定値 |
 | --- | --- | --- |
-| Text | — | `test` |
-| Font (system picker) | — | Impact |
-| Flame height | 0.0 – 0.2 | 0.10 |
-| Sway speed | 0.1 – 3.0 | 1.10 |
-| Color temperature | 0.5 – 2.0 | 1.00 |
-| Flame intensity | 0.3 – 2.5 | 1.00 |
-| Spark emission rate | 0 – 1500 | 150 |
-| Spark initial speed | 40 – 600 | 140 |
-| Spark lifetime (s) | 0.3 – 3.0 | 2.25 |
-| Spark size | 1 – 20 | 2.0 |
-| Spark spread | 0.0 – 1.0 | 1.00 |
-| Spark color | color picker | pale yellow `#FFFFDC` |
-| Spark origin | above / below the text | above |
-| Spark bloom | 0.0 – 3.0 | 1.0 |
+| テキスト | — | `test` |
+| フォント（システムピッカー） | — | Impact |
+| エフェクト | 炎 / レインボー | 炎 |
 
-## Build (Windows / CMake)
+選択中のエフェクトのパラメーターグループのみが表示されます。
+
+### 炎 (Flame)
+
+| プロパティ | 範囲 | 既定値 |
+| --- | --- | --- |
+| 炎の高さ | 0.0 – 0.2 | 0.10 |
+| 揺らぎ速度 | 0.1 – 3.0 | 1.10 |
+| 色温度 | 0.5 – 2.0 | 1.00 |
+| 炎の強度 | 0.3 – 2.5 | 1.00 |
+| 火の粉の放出量 | 0 – 1500 | 150 |
+| 火の粉の初速 | 40 – 600 | 140 |
+| 火の粉の寿命 (秒) | 0.3 – 3.0 | 2.25 |
+| 粒子サイズ | 1 – 20 | 2.0 |
+| ばらつき | 0.0 – 1.0 | 1.00 |
+| 火の粉の色 | カラーピッカー | 淡い黄 `#FFFFDC` |
+| 火の粉の出現位置 | フォントの上 / 下 | 上 |
+| 火の粉のブルーム | 0.0 – 3.0 | 1.0 |
+
+### レインボー (Rainbow)
+
+| プロパティ | 範囲 | 既定値 |
+| --- | --- | --- |
+| スクロール速度 | 0.0 – 2.0 | 0.40 |
+| 色の本数 | 0.25 – 8.0 | 1.50 |
+| グラデーション角度 | 0 – 360 | 90 |
+| 彩度 | 0.0 – 1.0 | 0.95 |
+| 明度 | 0.0 – 1.0 | 1.00 |
+
+## エフェクトの追加方法
+
+1. `src/effect-xxx.c`（＋ `.h`）を作り、`text_effect` を実装して
+   `const struct text_effect fx_xxx = { ... };` を公開する。
+2. `src/effect-registry.c` の `k_effects[]` 配列に `&fx_xxx` を追記する。
+3. 必要なら `data/effects/xxx.effect` シェーダーを追加する。
+4. `data/locale/en-US.ini` / `ja-JP.ini` に表示名・パラメーター名の文言を追加する。
+5. `CMakeLists.txt` の `target_sources` に新しい `.c` を追加する。
+
+## ビルド（Windows / CMake）
+
+最も簡単なのは付属の `build.bat` を使う方法です。**構成 → ビルド → `package/`
+への整形配置**までを一括で行います。
 
 ```
-cmake --preset windows-x64
-cmake --build --preset windows-x64 --config RelWithDebInfo
+build.bat            ビルド（差分）して package\ を最新化
+build.bat clean      build_x64\ と package\ を削除してフルビルド
 ```
 
-The configure step downloads the OBS sources / prebuilt deps pinned in
-`buildspec.json`. FreeType is resolved via `find_package` (vcpkg manifest
-`vcpkg.json`, or the obs-deps prefix).
+> PowerShell から実行する場合は `.\build.bat`（または `cmd /c build.bat`）と
+> 入力してください。
 
-> **Windows SDK note:** the committed `windows-x64` preset pins SDK
-> `10.0.22621`. If that SDK is not installed, add a local (git-ignored)
-> `CMakeUserPresets.json` that inherits `windows-x64` and overrides
-> `architecture` to your installed SDK (e.g. `x64,version=10.0.26100`), then
-> build with `--preset local`.
-
-### Packaging
-
-A `dist` install component emits exactly the tree that ships:
+CMake を直接使う場合:
 
 ```
+cmake --preset local
+cmake --build --preset local
 cmake --install build_x64 --config RelWithDebInfo --component dist --prefix package
 ```
+
+構成ステップで `buildspec.json` に固定された OBS ソース/プリビルド依存が
+ダウンロードされます。FreeType は `find_package`（vcpkg マニフェスト
+`vcpkg.json`、または obs-deps プレフィックス）で解決されます。
+
+> **Windows SDK についての注意:** コミット済みの `windows-x64` プリセットは SDK
+> `10.0.22621` を指定しています。未インストールの場合は、`windows-x64` を継承し
+> `architecture` を手元の SDK（例 `x64,version=10.0.26100`）に上書きした
+> `CMakeUserPresets.json`（git 管理外）を用意し、`--preset local` でビルド
+> してください。
+
+### パッケージの構成
+
+`dist` インストールコンポーネントは、配布するそのままのツリーを出力します。
 
 ```
 package/
@@ -107,24 +175,25 @@ package/
 │   ├─ font-effect-tools.dll
 │   └─ font-effect-tools.pdb
 └─ font-effect-tools/
-    ├─ effects/{flame,spark}.effect
+    ├─ effects/{flame,spark,rainbow}.effect
     └─ locale/{en-US,ja-JP}.ini
 ```
 
-### Install into OBS
+### OBS へのインストール
 
-The module name is `font-effect-tools`, so the OBS data directory **must** be
-named `font-effect-tools` (matching the DLL basename). Place the two parts as:
+モジュール名は `font-effect-tools` なので、OBS データディレクトリ名も
+**必ず** `font-effect-tools`（DLL のベース名と一致）にします。2 つの部分を
+次のように配置します。
 
 - `bin/font-effect-tools.dll` → `<obs>/obs-plugins/64bit/font-effect-tools.dll`
-- `font-effect-tools/` (effects + locale) →
+- `font-effect-tools/`（effects + locale） →
   `<obs>/data/obs-plugins/font-effect-tools/`
 
-(`<obs>` is your OBS install, e.g. `C:\Program Files\obs-studio`.) Restart OBS
-fully afterwards.
+（`<obs>` は OBS のインストール先。例: `C:\Program Files\obs-studio`。）配置後は
+OBS を完全に再起動してください。
 
-## License (GPLv2) — source availability
+## ライセンス（GPLv2）— ソース提供義務
 
-OBS Studio is GPLv2 and so is this plugin. If you distribute binaries you must
-make the corresponding source available to recipients. Ship
-`dist/SOURCE-NOTICE.txt` alongside the binary with a link to this repository.
+OBS Studio は GPLv2 であり、本プラグインも GPLv2 です。バイナリを配布する場合は、
+対応するソースを受領者に提供する必要があります。バイナリには本リポジトリへの
+リンクを記した `dist/SOURCE-NOTICE.txt` を同梱してください。

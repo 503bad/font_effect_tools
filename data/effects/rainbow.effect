@@ -1,0 +1,58 @@
+/* Rainbow fill — fills the text coverage mask with an animated, scrolling
+ * hue gradient. The gradient runs along `dir`; `time` scrolls the hue. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* GS_R8 coverage mask; .r = text coverage */
+
+uniform float  time;
+uniform float  speed;       /* hue scroll speed                       */
+uniform float  scale;       /* color bands across the text            */
+uniform float  saturation;  /* 0..1                                   */
+uniform float  brightness;  /* 0..1                                   */
+uniform float2 dir;         /* gradient direction (unit-ish vector)   */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float3 hsv2rgb(float h, float s, float v)
+{
+	float3 p = abs(frac(h + float3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+	return v * lerp(float3(1.0, 1.0, 1.0), saturate(p - 1.0), s);
+}
+
+float4 PSRainbow(VertData v) : TARGET
+{
+	float cov = image.Sample(maskSampler, v.uv).r;
+
+	/* Project the uv onto the gradient direction so the bands run along it. */
+	float g = dot(v.uv, dir);
+	float hue = frac(g * scale + time * speed);
+
+	float3 col = hsv2rgb(hue, saturation, brightness);
+	return float4(col, cov);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSRainbow(v);
+	}
+}

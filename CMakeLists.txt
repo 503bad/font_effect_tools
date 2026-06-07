@@ -35,6 +35,9 @@ target_sources(
     src/flametext-source.c
     src/flametext-text.c
     src/flametext-particles.c
+    src/effect-registry.c
+    src/effect-flame.c
+    src/effect-rainbow.c
 )
 
 if(WIN32)
