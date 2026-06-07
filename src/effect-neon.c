@@ -22,6 +22,7 @@ struct neon_state {
 	float    bloom;        /* halo strength                 */
 	float    brightness;   /* overall luminance multiplier  */
 	float    flicker_rate; /* flicker frequency (0 = off)   */
+	bool     outline;      /* draw the tube line (else glow only) */
 };
 
 /* Decompose an OBS 0xAABBGGRR color into normalized rgba. */
@@ -123,6 +124,7 @@ static void neon_update(void *data, obs_data_t *settings)
 	s->bloom = (float)obs_data_get_double(settings, "neon_bloom");
 	s->brightness = (float)obs_data_get_double(settings, "neon_brightness");
 	s->flicker_rate = (float)obs_data_get_double(settings, "neon_flicker_rate");
+	s->outline = obs_data_get_bool(settings, "neon_outline");
 }
 
 static void neon_render(void *data, const struct fx_render_ctx *ctx)
@@ -141,6 +143,7 @@ static void neon_render(void *data, const struct fx_render_ctx *ctx)
 	gs_eparam_t *p_bloom = gs_effect_get_param_by_name(e, "bloom");
 	gs_eparam_t *p_bri = gs_effect_get_param_by_name(e, "brightness");
 	gs_eparam_t *p_flick = gs_effect_get_param_by_name(e, "flicker");
+	gs_eparam_t *p_outline = gs_effect_get_param_by_name(e, "outline");
 
 	if (p_image)
 		gs_effect_set_texture(p_image, mask->tex);
@@ -167,6 +170,8 @@ static void neon_render(void *data, const struct fx_render_ctx *ctx)
 	if (p_flick)
 		gs_effect_set_float(p_flick,
 				    neon_flicker(ctx->time, s->flicker_rate));
+	if (p_outline)
+		gs_effect_set_float(p_outline, s->outline ? 1.0f : 0.0f);
 
 	/* Premultiplied output: bright cores add light over the background. */
 	gs_blend_state_push();
@@ -178,6 +183,8 @@ static void neon_render(void *data, const struct fx_render_ctx *ctx)
 
 static void neon_properties(obs_properties_t *p)
 {
+	obs_properties_add_bool(p, "neon_outline",
+		obs_module_text("NeonOutline"));
 	obs_properties_add_color_alpha(p, "neon_color",
 		obs_module_text("NeonColor"));
 	obs_properties_add_float_slider(p, "neon_width",
@@ -194,6 +201,7 @@ static void neon_properties(obs_properties_t *p)
 
 static void neon_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_bool(settings, "neon_outline", true);
 	obs_data_set_default_int(settings, "neon_color", DEFAULT_NEON_COLOR);
 	obs_data_set_default_double(settings, "neon_width", 3.0);
 	obs_data_set_default_double(settings, "neon_glow", 14.0);

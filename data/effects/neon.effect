@@ -24,6 +24,7 @@ uniform float  glow_radius;  /* bloom spread in pixels                     */
 uniform float  bloom;        /* bloom (halo) strength                      */
 uniform float  brightness;   /* overall luminance multiplier               */
 uniform float  flicker;      /* per-frame flicker multiplier (from host)   */
+uniform float  outline;      /* 1 = draw the tube line, 0 = glow only       */
 
 sampler_state maskSampler {
 	Filter   = Linear;
@@ -84,6 +85,11 @@ float4 PSNeon(VertData v) : TARGET
 	float c   = sample_cov(v.uv);
 	float fw  = max(fwidth(c), 1e-4);
 	float core = 1.0 - smoothstep(0.0, fw * 2.0, abs(c - 0.5));
+
+	/* Outline toggle: when off, the tube line vanishes and only the soft
+	 * glow halo remains. */
+	tube *= outline;
+	core *= outline;
 
 	/* Soft halo (bloom). Derived from `band` (not from `dist`) so it is
 	 * exactly 0 deep inside *and* outside the disc — that keeps thick glyph
