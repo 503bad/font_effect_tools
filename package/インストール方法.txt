@@ -52,9 +52,3 @@ Font Effect Tools (Flame Text Source) — OBS プラグイン 導入手順
   1. OBS を再起動する
   2. 「ソース」→「＋」→「Font Effect Tools」を追加
   3. プロパティでテキスト・フォント・炎/火の粉のパラメータを調整
-
-
-■ 同梱スクリプト
-
-  この package フォルダにある install-to-obs.ps1 を右クリック→
-  「PowerShell で実行」すると、方法A の場所へ自動コピーします。
