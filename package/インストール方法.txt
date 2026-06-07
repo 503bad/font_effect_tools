@@ -1,0 +1,60 @@
+Text Effect Tools (Flame Text Source) — OBS プラグイン 導入手順
+================================================================
+
+■ このフォルダの中身（これだけが「実際に使うファイル」です）
+
+  effect-tools\
+    ├ bin\64bit\effect-tools.dll   ← プラグイン本体
+    ├ bin\64bit\effect-tools.pdb   ← デバッグ情報（任意・無くても動く）
+    ├ data\effects\flame.effect    ← 炎シェーダー
+    ├ data\effects\spark.effect    ← 火の粉シェーダー
+    ├ data\locale\en-US.ini        ← 英語表示名
+    ├ data\locale\ja-JP.ini        ← 日本語表示名
+    └ SOURCE-NOTICE.txt            ← GPL ソース入手先（配布時に同梱）
+
+  ※ build_x64\ や .deps\ などは「ビルドの中間生成物・依存ライブラリ」です。
+    OBS に入れる必要はありません。使うのは上の effect-tools\ フォルダだけです。
+
+
+■ インストール（どちらか一方）
+
+ ● 方法A：自分のOBSだけに入れる（管理者権限不要・おすすめ）
+
+   この「effect-tools」フォルダごと、次の場所にコピーします:
+
+     %AppData%\obs-studio\plugins\
+
+   結果がこうなればOK:
+     %AppData%\obs-studio\plugins\effect-tools\bin\64bit\effect-tools.dll
+     %AppData%\obs-studio\plugins\effect-tools\data\...
+
+   （エクスプローラーのアドレスバーに %AppData%\obs-studio\plugins と
+     入力すると場所を開けます。plugins フォルダが無ければ作成してください）
+
+ ● 方法B：OBS本体に入れる（管理者権限が必要）
+
+   "C:\Program Files\obs-studio\obs-plugins\64bit\" に effect-tools.dll を、
+   "C:\Program Files\obs-studio\data\obs-plugins\effect-tools\" に data の
+   中身を置きます。方法Aの方が簡単です。
+
+   ★最重要★ data フォルダの名前は、DLL名と完全に一致させること。
+     DLL が「effect-tools.dll」（ハイフン）なので、data 側も
+     「effect-tools」（ハイフン）にする。
+       OK : ...\data\obs-plugins\effect-tools\effects\flame.effect
+       NG : ...\data\obs-plugins\effect_tools\...   ← アンダースコアは不可
+     OBS は DLL名と同じ名前の data フォルダしか読み込まない。名前が
+     1文字でも違うと「読み込まれるのにエフェクトが見つからず、何も
+     描画されない」状態になる（枠だけ表示される）。
+
+
+■ 使い方
+
+  1. OBS を再起動する
+  2. 「ソース」→「＋」→「炎テキスト」(英語表示なら "Flame Text") を追加
+  3. プロパティでテキスト・フォント・炎/火の粉のパラメータを調整
+
+
+■ 同梱スクリプト
+
+  この package フォルダにある install-to-obs.ps1 を右クリック→
+  「PowerShell で実行」すると、方法A の場所へ自動コピーします。

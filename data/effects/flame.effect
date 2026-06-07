@@ -1,0 +1,131 @@
+/* Flame Text Source — rising-flame fragment shader.
+ *
+ * Samples a text coverage mask (red channel) and smears it upward with
+ * time-scrolling FBM turbulence to produce a flame that licks above the
+ * glyphs. Color runs white/yellow at the hot base to dark red / smoke at the
+ * cool tips. Everything is driven by `time`, so it never sits still. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* GS_R8 coverage mask; .r = text coverage */
+
+uniform float  time;
+uniform float2 canvas;        /* mask size in pixels (for aspect)        */
+uniform float  flame_height;  /* upward reach, fraction of canvas height  */
+uniform float  sway_speed;    /* turbulence scroll speed                  */
+uniform float  color_temp;    /* heat multiplier — higher = hotter colors */
+uniform float  intensity;     /* overall flame strength                   */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+/* --- value-noise FBM (no texture lookups) --- */
+float hash21(float2 p)
+{
+	p = frac(p * float2(123.34, 345.45));
+	p += dot(p, p + 34.345);
+	return frac(p.x * p.y);
+}
+
+float vnoise(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float2 u = f * f * (3.0 - 2.0 * f);
+	float a = hash21(i + float2(0.0, 0.0));
+	float b = hash21(i + float2(1.0, 0.0));
+	float c = hash21(i + float2(0.0, 1.0));
+	float d = hash21(i + float2(1.0, 1.0));
+	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float fbm(float2 p)
+{
+	float s = 0.0;
+	float amp = 0.5;
+	float freq = 1.0;
+	for (int i = 0; i < 4; i++) {
+		s += amp * vnoise(p * freq);
+		freq *= 2.0;
+		amp *= 0.5;
+	}
+	return s;
+}
+
+float sample_cov(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float3 fire_color(float h)
+{
+	float3 c = lerp(float3(0.0, 0.0, 0.0), float3(0.45, 0.02, 0.0),
+			smoothstep(0.0, 0.16, h));
+	c = lerp(c, float3(0.85, 0.10, 0.0), smoothstep(0.10, 0.36, h));
+	c = lerp(c, float3(1.0, 0.45, 0.05), smoothstep(0.32, 0.56, h));
+	c = lerp(c, float3(1.0, 0.88, 0.30), smoothstep(0.52, 0.80, h));
+	c = lerp(c, float3(1.0, 1.0, 0.92), smoothstep(0.78, 1.0, h));
+	return c;
+}
+
+float4 PSFlame(VertData v) : TARGET
+{
+	float aspect = canvas.x / max(canvas.y, 1.0);
+	float2 nco = float2(v.uv.x * aspect, v.uv.y);
+	float t = time * sway_speed;
+
+	float reach = max(flame_height, 0.02);
+	const int STEPS = 20;
+
+	float heat = 0.0;
+	for (int i = 0; i < STEPS; i++) {
+		float f = (float)i / (float)(STEPS - 1);   /* 0 here .. 1 far below */
+		float yoff = f * reach;
+
+		/* Turbulence: scrolls upward (subtract t) and tightens near tips. */
+		float n = fbm(float2(nco.x * 3.0, (nco.y + yoff) * 3.0 - t));
+		float sway = (n - 0.5) * 0.16 * f;
+
+		float2 suv = float2(v.uv.x + sway, v.uv.y + yoff);
+		float cov = sample_cov(suv);
+
+		/* Lower samples (closer to the text) drive most of the heat; the
+		 * tip contributions fade so the flame thins as it rises. */
+		heat += cov * (1.0 - f) * (1.0 - f);
+	}
+	heat = heat / (float)(STEPS) * 2.4;
+
+	/* Flicker the whole field a touch so even the core shimmers. */
+	float flick = 0.85 + 0.15 * fbm(float2(nco.x * 5.0, nco.y * 5.0 - t * 1.7));
+	heat *= flick * intensity;
+
+	float h = saturate(heat * color_temp);
+	float3 col = fire_color(h);
+	float alpha = smoothstep(0.05, 0.20, heat);
+
+	return float4(col, alpha);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSFlame(v);
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "effect-tools",
+  "version-string": "0.1.0",
+  "description": "OBS Studio source plugin: renders text as flame and emits spark particles",
+  "dependencies": [
+    "freetype"
+  ]
+}

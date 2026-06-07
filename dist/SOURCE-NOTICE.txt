@@ -1,0 +1,18 @@
+Text Effect Tools (Flame Text Source) for OBS Studio
+====================================================
+
+This plugin is free software licensed under the GNU General Public License,
+version 2 (GPLv2), the same license as OBS Studio.
+
+You are entitled to the complete corresponding source code for this binary.
+The source code is published at:
+
+    https://github.com/your-org/effect-tools      <-- replace with the real URL
+
+A copy of the GPLv2 license text is included as LICENSE in the source
+repository and is also available at:
+
+    https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+If you received this binary without access to the source, please contact the
+distributor (see buildspec.json "email") to obtain it.

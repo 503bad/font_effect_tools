@@ -1,0 +1,56 @@
+/* Flame Text Source — additive ember/spark sprites.
+ *
+ * Each particle is a camera-facing quad. TEXCOORD0 is the corner uv used for a
+ * soft radial falloff; TEXCOORD1 carries per-particle (heat, brightness). The
+ * color blends between a cool and hot ember tint by heat. Rendered with
+ * additive blending so overlapping embers bloom. */
+
+uniform float4x4 ViewProj;
+uniform float4 ember_hot;
+uniform float4 ember_cool;
+uniform float bloom;   /* width/strength of the additive glow halo */
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;  /* corner 0..1            */
+	float2 dat : TEXCOORD1;  /* x = heat, y = brightness */
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	o.dat = v.dat;
+	return o;
+}
+
+float4 PSSpark(VertData v) : TARGET
+{
+	float2 d = v.uv - 0.5;
+	float r = saturate(length(d) * 2.0);   /* 0 center .. 1 edge */
+	float fall = 1.0 - r;
+
+	/* Two lobes: a tight hot core, plus a wide soft halo that produces the
+	 * bloom when many embers overlap under additive blending. `bloom`
+	 * scales the halo. */
+	float core = fall * fall * fall * fall;
+	float halo = fall * fall;
+	float lum = core + halo * bloom;
+
+	float heat = saturate(v.dat.x);
+	float bright = saturate(v.dat.y);
+
+	float3 col = lerp(ember_cool.rgb, ember_hot.rgb, heat);
+	float a = lum * bright;
+	return float4(col, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSSpark(v);
+	}
+}

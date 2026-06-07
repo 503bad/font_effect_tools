@@ -1,0 +1,44 @@
+cmake_minimum_required(VERSION 3.28...3.30)
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/common/bootstrap.cmake" NO_POLICY_SCOPE)
+
+project(${_name} VERSION ${_version} LANGUAGES C)
+
+option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" OFF)
+option(ENABLE_QT "Use Qt functionality" OFF)
+
+include(compilerconfig)
+include(defaults)
+include(helpers)
+
+add_library(${CMAKE_PROJECT_NAME} MODULE)
+
+# defaults.cmake downloaded OBS sources to ${CMAKE_CURRENT_SOURCE_DIR}/.deps
+# and installed libobsConfig.cmake under .deps/cmake/. When the vcpkg
+# toolchain is in use it can hide that prefix from find_package, so point
+# directly at the config dir as a fallback.
+if(NOT libobs_DIR AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake/libobsConfig.cmake")
+  set(libobs_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.deps/cmake" CACHE PATH "Path to libobsConfig.cmake" FORCE)
+endif()
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/.deps")
+
+find_package(libobs REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
+
+find_package(Freetype REQUIRED)
+target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE Freetype::Freetype)
+
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
+    src/plugin-main.c
+    src/flametext-source.c
+    src/flametext-text.c
+    src/flametext-particles.c
+)
+
+if(WIN32)
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/flametext-font-resolve-win.c)
+endif()
+
+set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
