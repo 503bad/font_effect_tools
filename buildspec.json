@@ -33,13 +33,13 @@
     },
     "platformConfig": {
         "macos": {
-            "bundleId": "com.effecttools.flametext"
+            "bundleId": "com.fonteffecttools.plugin"
         }
     },
-    "name": "effect-tools",
-    "displayName": "Text Effect Tools (Flame Text Source)",
+    "name": "font-effect-tools",
+    "displayName": "Font Effect Tools",
     "version": "0.1.0",
-    "author": "Effect Tools contributors",
-    "website": "https://example.com/effect-tools",
-    "email": "effect-tools@example.com"
+    "author": "Font Effect Tools contributors",
+    "website": "https://example.com/font-effect-tools",
+    "email": "font-effect-tools@example.com"
 }

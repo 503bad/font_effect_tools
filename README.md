@@ -1,4 +1,4 @@
-# Text Effect Tools — Flame Text Source (OBS plugin)
+# Font Effect Tools — Flame Text Source (OBS plugin)
 
 An OBS Studio **input source** that renders user text as a living flame and
 emits glowing spark particles that overshoot the glyphs. Built on the
@@ -70,7 +70,7 @@ The configure step downloads the OBS sources / prebuilt deps pinned in
 `buildspec.json`. FreeType is resolved via `find_package` (vcpkg manifest
 `vcpkg.json`, or the obs-deps prefix). Copy the built `.dll` and the `data/`
 folder into your OBS plugin directory, e.g.
-`%AppData%\obs-studio\plugins\effect-tools\bin\64bit\`.
+`%AppData%\obs-studio\plugins\font-effect-tools\bin\64bit\`.
 
 ## License (GPLv2) — source availability
 

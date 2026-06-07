@@ -1,12 +1,12 @@
-# Copies the effect-tools plugin into the current user's OBS plugins folder.
+# Copies the font-effect-tools plugin into the current user's OBS plugins folder.
 # Run: right-click -> "Run with PowerShell", or:  powershell -ExecutionPolicy Bypass -File install-to-obs.ps1
 
 $ErrorActionPreference = 'Stop'
-$src  = Join-Path $PSScriptRoot 'effect-tools'
-$dest = Join-Path $env:APPDATA 'obs-studio\plugins\effect-tools'
+$src  = Join-Path $PSScriptRoot 'font-effect-tools'
+$dest = Join-Path $env:APPDATA 'obs-studio\plugins\font-effect-tools'
 
 if (-not (Test-Path $src)) {
-    Write-Host "ERROR: 'effect-tools' folder not found next to this script." -ForegroundColor Red
+    Write-Host "ERROR: 'font-effect-tools' folder not found next to this script." -ForegroundColor Red
     exit 1
 }
 

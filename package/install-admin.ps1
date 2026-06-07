@@ -14,13 +14,13 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administra
 }
 
 $ErrorActionPreference = 'Stop'
-$src    = Join-Path $PSScriptRoot 'effect-tools'
+$src    = Join-Path $PSScriptRoot 'font-effect-tools'
 $obsDir = 'C:\Program Files\obs-studio'
 
-$dllSrc  = Join-Path $src 'bin\64bit\effect-tools.dll'
+$dllSrc  = Join-Path $src 'bin\64bit\font-effect-tools.dll'
 $dllDst  = Join-Path $obsDir 'obs-plugins\64bit'
 $dataSrc = Join-Path $src 'data'
-$dataDst = Join-Path $obsDir 'data\obs-plugins\effect-tools'
+$dataDst = Join-Path $obsDir 'data\obs-plugins\font-effect-tools'
 
 Write-Host "Installing Flame Text plugin into: $obsDir`n"
 
@@ -30,7 +30,7 @@ New-Item -ItemType Directory -Force -Path $dataDst | Out-Null
 Copy-Item $dllSrc -Destination $dllDst -Force
 Copy-Item -Path (Join-Path $dataSrc '*') -Destination $dataDst -Recurse -Force
 
-Write-Host "DLL  -> $dllDst\effect-tools.dll"      -ForegroundColor Green
+Write-Host "DLL  -> $dllDst\font-effect-tools.dll"      -ForegroundColor Green
 Write-Host "data -> $dataDst\"                       -ForegroundColor Green
 Write-Host ""
 Write-Host "Done. Fully restart OBS (quit and reopen), then the Flame Text source will render." -ForegroundColor Green

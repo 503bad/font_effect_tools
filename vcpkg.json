@@ -1,7 +1,7 @@
 {
-  "name": "effect-tools",
+  "name": "font-effect-tools",
   "version-string": "0.1.0",
-  "description": "OBS Studio source plugin: renders text as flame and emits spark particles",
+  "description": "Font Effect Tools — OBS source plugin: renders text as flame and emits spark particles",
   "dependencies": [
     "freetype"
   ]

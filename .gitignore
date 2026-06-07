@@ -9,7 +9,7 @@ CMakeUserPresets.json
 
 # Generated install payload (rebuild with: cmake --install ... --prefix package).
 # The helper scripts/notes in package/ are kept; only the built tree is ignored.
-/package/effect-tools/
+/package/font-effect-tools/
 *.dll
 *.pdb
 *.exp
