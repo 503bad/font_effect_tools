@@ -1,0 +1,82 @@
+/* CRT scanlines — fills the text with `font_color`, then darkens alternating
+ * horizontal lines, adds a soft horizontal bleed, a gentle row wobble and a
+ * faint brightness flicker. Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float2 canvas;       /* mask size in px                    */
+uniform float4 font_color;   /* text fill                          */
+uniform float  time;
+uniform float  intensity;    /* scanline darkness (0..1)           */
+uniform float  density;      /* line frequency (0..1)              */
+uniform float  flicker;      /* brightness flicker (0..1)          */
+uniform float  wobble;       /* horizontal bleed / jitter (0..1)   */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float hash11(float x)
+{
+	float s = sin(x) * 43758.5453;
+	return s - floor(s);
+}
+
+float cov_at(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSScanline(VertData v) : TARGET
+{
+	float py = v.uv.y * canvas.y;
+
+	/* Per-row wobble: a slow horizontal shift that varies along y/time. */
+	float jit = (hash11(floor(py) * 0.13 + floor(time * 18.0)) - 0.5);
+	float dx = (sin(py * 0.12 + time * 3.0) * 0.5 + jit) * wobble *
+		   3.0 / canvas.x;
+	float2 uv = float2(v.uv.x + dx, v.uv.y);
+
+	/* Horizontal bleed: average a few side taps (the CRT "smear"). */
+	float bleed = wobble * 2.5 / canvas.x;
+	float cov = cov_at(uv) * 0.5 +
+		    cov_at(uv + float2(bleed, 0.0)) * 0.25 +
+		    cov_at(uv - float2(bleed, 0.0)) * 0.25;
+
+	/* Scanline darkening. density scales the line frequency. */
+	float lines = 0.5 + 0.5 * sin(py * 3.14159 * (0.3 + density * 1.4));
+	float scan = lerp(1.0, lines, intensity);
+
+	/* Flicker: a fast subtle pulse plus occasional noise dips. */
+	float fl = 1.0 + flicker * (0.08 * sin(time * 50.0) +
+				    0.12 * (hash11(floor(time * 24.0)) - 0.5));
+
+	float3 col = font_color.rgb * scan * fl;
+	float a = cov * font_color.a;
+	return float4(col * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSScanline(v);
+	}
+}

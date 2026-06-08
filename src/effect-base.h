@@ -20,6 +20,15 @@ struct fx_render_ctx {
 	uint32_t height; /* canvas height (== mask->height when present) */
 };
 
+/* Extra empty room (in pixels) an effect wants reserved on each side of the
+ * text on the shared canvas, beyond the host defaults. */
+struct fx_margins {
+	uint32_t left;
+	uint32_t right;
+	uint32_t top;
+	uint32_t bottom;
+};
+
 /* A selectable text effect. Each effect owns a per-source-instance, opaque
  * `state` blob and a set of namespaced settings keys; the host owns the shared
  * text/font/mask and decides which effect is active.
@@ -49,6 +58,14 @@ struct text_effect {
 	 * for the host default. The water drip effect uses this to make room for
 	 * drops to fall the requested distance. */
 	uint32_t (*wanted_bottom_pad)(void *state, uint32_t font_size);
+
+	/* How much extra room (in pixels) this effect wants on each side of the
+	 * text beyond the host defaults. Called after update(), so it may depend
+	 * on settings. Leave NULL for none. Effects whose output extends past the
+	 * glyphs in any direction (e.g. god rays streaming outward) use this to
+	 * avoid being clipped by the canvas edge. */
+	void (*wanted_margins)(void *state, uint32_t font_size,
+			       struct fx_margins *out);
 
 	/* The shared text mask was (re)built; refresh anything derived from
 	 * its geometry (emitter bands, etc.). `mask` may be NULL. */

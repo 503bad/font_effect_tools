@@ -45,6 +45,13 @@ static void rebuild_mask(struct flametext_source *s)
 		? active->wanted_bottom_pad(s->states[s->active], s->font_size)
 		: 0u;
 
+	/* Extra room on each side for effects that stream past the glyphs. */
+	struct fx_margins mg = {0u, 0u, 0u, 0u};
+	if (active->wanted_margins)
+		active->wanted_margins(s->states[s->active], s->font_size, &mg);
+	if (mg.bottom > bottom_pad)
+		bottom_pad = mg.bottom;
+
 	obs_enter_graphics();
 	if (s->mask) {
 		flametext_mask_free(s->mask);
@@ -53,7 +60,8 @@ static void rebuild_mask(struct flametext_source *s)
 	if (s->text && s->text[0] && s->font_path[0]) {
 		s->mask = flametext_mask_build(s->text, s->font_path,
 					       s->font_size, s->bold, s->italic,
-					       bottom_pad);
+					       bottom_pad, mg.left, mg.right,
+					       mg.top);
 	}
 	obs_leave_graphics();
 

@@ -43,6 +43,20 @@ target_sources(
     src/effect-water.c
     src/effect-glitch.c
     src/effect-watersurface.c
+    src/effect-spotlight.c
+    src/effect-chroma.c
+    src/effect-godray.c
+    src/effect-scanline.c
+    src/effect-arc.c
+    src/effect-circuit.c
+    src/flametext-sprites.c
+    src/effect-sparkle.c
+    src/effect-dust.c
+    src/effect-imagedeco.c
+    src/effect-depth3d.c
+    src/effect-cube.c
+    src/effect-sidebound.c
+    src/effect-hop.c
 )
 
 if(WIN32)

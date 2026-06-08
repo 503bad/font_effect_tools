@@ -1,0 +1,115 @@
+/* Current circuit — finds the glyph contour (like the neon effect) and runs
+ * bright pulses along it, like current racing through a circuit trace. The flow
+ * direction follows the contour tangent (derived from the coverage gradient) so
+ * the light circulates around each letter. `rate` is the travel speed, `random`
+ * jitters the dashes, `glow`/`bloom` set brightness and halo. Premult output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float2 canvas;       /* mask size in px                    */
+uniform float4 font_color;   /* base text fill                     */
+uniform float4 light_color;  /* travelling pulse tint              */
+uniform float  time;
+uniform float  rate;         /* pulse travel speed                 */
+uniform float  random;       /* dash jitter                        */
+uniform float  glow;         /* pulse brightness                   */
+uniform float  bloom;        /* halo strength                      */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float hash11(float x)
+{
+	float s = sin(x * 12.9898) * 43758.5453;
+	return s - floor(s);
+}
+
+float cov_at(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSCircuit(VertData v) : TARGET
+{
+	float2 px = v.uv * canvas;
+
+	/* Blur the coverage with a golden-angle disc to get a smooth field. */
+	float radius = 7.0;
+	const int N = 16;
+	const float GA = 2.39996323;
+	float blurred = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);
+		float a = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * radius);
+		blurred += cov_at(v.uv + off / canvas);
+	}
+	blurred /= (float)N;
+
+	/* Contour band peaks where blurred == 0.5. */
+	float band = saturate(1.0 - 2.0 * abs(blurred - 0.5));
+
+	/* Gradient of the field -> tangent along the contour for the flow axis. */
+	float2 ex = float2(2.0, 0.0) / canvas;
+	float2 ey = float2(0.0, 2.0) / canvas;
+	float gx = cov_at(v.uv + ex) - cov_at(v.uv - ex);
+	float gy = cov_at(v.uv + ey) - cov_at(v.uv - ey);
+	float2 tangent = float2(-gy, gx);
+	tangent /= (length(tangent) + 1e-5);
+
+	float along = dot(px, tangent);
+	float jit = (hash11(floor(along * 0.08)) - 0.5) * random * 16.0;
+	float dash = frac((along + jit) / 24.0 - time * rate);
+
+	/* A bright moving segment within each dash period. */
+	float pulse = smoothstep(0.45, 0.62, dash) -
+		      smoothstep(0.80, 0.97, dash);
+	pulse = saturate(pulse);
+
+	float trace = band * pulse;
+
+	/* Crisp contour core for the lit dashes. */
+	float c = cov_at(v.uv);
+	float fw = max(fwidth(c), 1e-4);
+	float core = (1.0 - smoothstep(0.0, fw * 2.0, abs(c - 0.5))) * pulse;
+
+	float halo = band * band * bloom * pulse;
+
+	float3 light = light_color.rgb *
+		       (trace * (0.6 + glow) + core * 1.2 + halo);
+
+	/* Dim base text underneath. */
+	float a = c * font_color.a;
+	float3 base = font_color.rgb * a;
+
+	float3 rgb = base + light;
+	float outA = saturate(a + (trace + core + halo) * 0.7);
+	return float4(rgb, outA);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSCircuit(v);
+	}
+}

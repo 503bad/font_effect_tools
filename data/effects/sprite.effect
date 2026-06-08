@@ -1,0 +1,127 @@
+/* Generic billboard sprite shader for the particle effects (sparkle, dust,
+ * image decoration). Each quad carries a per-vertex COLOR and TEXCOORD1 =
+ * (fade, seed). `shape` selects a procedural shape (or an image); `glow`
+ * brightens the core and `bloom` adds a soft round halo behind the sprite.
+ * Output is premultiplied alpha. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* user image (shape == 5)        */
+
+uniform float shape;       /* 0 soft 1 circle 2 star 3 heart 4 petal 5 image */
+uniform float glow;        /* core brightness                */
+uniform float bloom;       /* halo strength                  */
+uniform float use_image;   /* 1 when an image is bound        */
+
+sampler_state spriteSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos   : POSITION;
+	float2 uv    : TEXCOORD0;
+	float2 dat   : TEXCOORD1; /* (fade, seed) */
+	float4 color : COLOR;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	o.dat = v.dat;
+	o.color = v.color;
+	return o;
+}
+
+float dot2(float2 v) { return dot(v, v); }
+
+/* iq: 5-point star signed distance. */
+float sdStar5(float2 p, float r, float rf)
+{
+	const float2 k1 = float2(0.809016994375, -0.587785252292);
+	const float2 k2 = float2(-k1.x, k1.y);
+	p.x = abs(p.x);
+	p -= 2.0 * max(dot(k1, p), 0.0) * k1;
+	p -= 2.0 * max(dot(k2, p), 0.0) * k2;
+	p.x = abs(p.x);
+	p.y -= r;
+	float2 ba = rf * float2(-k1.y, k1.x) - float2(0.0, 1.0);
+	float h = clamp(dot(p, ba) / dot(ba, ba), 0.0, r);
+	return length(p - ba * h) * sign(p.y * ba.x - p.x * ba.y);
+}
+
+/* iq: vesica (pointed leaf) signed distance. */
+float sdVesica(float2 p, float r, float d)
+{
+	p = abs(p);
+	float b = sqrt(r * r - d * d);
+	return ((p.y - b) * d > p.x * b)
+		       ? length(p - float2(0.0, b)) * sign(d)
+		       : length(p - float2(-d, 0.0)) - r;
+}
+
+float4 PSSprite(VertData v) : TARGET
+{
+	float2 p = v.uv - 0.5;
+	int sh = (int)(shape + 0.5);
+
+	float fill;
+	float3 body;
+
+	if (sh == 5) {
+		float4 t = image.Sample(spriteSampler, v.uv);
+		body = t.rgb;
+		fill = t.a;
+	} else if (sh == 0) {
+		float d = length(p) * 2.0;
+		fill = saturate(1.0 - d);
+		fill *= fill;
+		body = v.color.rgb;
+	} else if (sh == 3) {
+		/* Heart via implicit curve (avoids pow of negative base). */
+		float2 q = p / 0.42;
+		q.y = -q.y;
+		float x2 = q.x * q.x;
+		float yy = q.y;
+		float base = x2 + yy * yy - 1.0;
+		float vimp = base * base * base - x2 * yy * yy * yy;
+		float aa = max(fwidth(vimp), 1e-4);
+		fill = smoothstep(aa, -aa, vimp);
+		body = v.color.rgb;
+	} else {
+		float sd;
+		if (sh == 1)
+			sd = length(p) - 0.34;
+		else if (sh == 2)
+			sd = sdStar5(p, 0.40, 0.45);
+		else /* 4 petal */
+			sd = sdVesica(p, 0.40, 0.27);
+		float aa = max(fwidth(sd), 1e-4);
+		fill = smoothstep(aa, -aa, sd);
+		body = v.color.rgb;
+	}
+
+	/* Round halo behind the sprite for the bloom / outline glow. */
+	float hd = length(p) * 2.0;
+	float halo = saturate(1.0 - hd);
+	halo = halo * halo * halo;
+
+	float a = fill * v.color.a;
+	float3 bodyRGB = body * (1.0 + glow);
+	float3 haloRGB = v.color.rgb * (halo * bloom);
+
+	float3 rgb = bodyRGB * a + haloRGB;
+	float outA = saturate(a + halo * bloom * 0.5);
+	return float4(rgb, outA);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSSprite(v);
+	}
+}

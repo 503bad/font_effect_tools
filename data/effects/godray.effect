@@ -1,0 +1,99 @@
+/* God rays — treats the glyphs as a bright emitter and streams light shafts in
+ * the `dir` direction by accumulating decayed samples of the coverage along
+ * that direction (a directional/radial blur). `random` flutters the shafts over
+ * time. The upright text is drawn in `font_color` on top. Premultiplied out. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float2 canvas;       /* mask size in px                    */
+uniform float4 font_color;   /* upright text fill                  */
+uniform float4 light_color;  /* shaft tint                         */
+uniform float  time;
+uniform float  strength;     /* shaft brightness / density         */
+uniform float  length;       /* shaft reach in px                  */
+uniform float  light;        /* light intensity                    */
+uniform float  random;       /* flutter randomness                 */
+uniform float2 dir;          /* shaft direction (unit-ish)         */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float hash11(float x)
+{
+	float s = sin(x) * 43758.5453;
+	return s - floor(s);
+}
+
+float cov_at(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSGodray(VertData v) : TARGET
+{
+	float2 d = normalize(dir + float2(0.0, 1e-5));
+	/* March backwards along the shaft direction over `length` px, fading the
+	 * contribution toward the far end so the rays taper out smoothly instead
+	 * of being hard-clipped at the canvas edge. */
+	const int STEPS = 40;
+	float reach = max(length, 1.0);
+	float step_px = reach / (float)STEPS;
+	float2 step_uv = -d * step_px / canvas;
+
+	float accum = 0.0;
+	float wsum = 0.0;
+	float2 uv = v.uv;
+	for (int i = 0; i < STEPS; i++) {
+		uv += step_uv;
+		float fi = (float)i / (float)STEPS;
+		float taper = (1.0 - fi) * (1.0 - fi); /* smooth fade to 0 */
+		accum += cov_at(uv) * taper;
+		wsum += taper;
+	}
+	accum /= max(wsum, 1e-4);
+
+	/* Flutter: shafts shimmer based on the perpendicular position + time. */
+	float2 perp = float2(-d.y, d.x);
+	float across = dot(v.uv * canvas, perp);
+	float flick = 1.0 + random * (hash11(floor(across * 0.05) +
+				       floor(time * 6.0)) - 0.5);
+	flick = max(flick, 0.0);
+
+	float rays = accum * strength * light * flick;
+	float3 shaft = light_color.rgb * rays;
+
+	/* Upright text on top. */
+	float cov = cov_at(v.uv);
+	float a = cov * font_color.a;
+	float3 base = font_color.rgb * a;
+
+	float3 rgb = base + shaft;
+	float outA = saturate(a + rays * 0.5);
+	return float4(rgb, outA);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSGodray(v);
+	}
+}

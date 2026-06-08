@@ -1,0 +1,61 @@
+/* Spotlight sweep — fills the text with `font_color` and runs a bright band of
+ * `light_color` across it. The band position scrolls with time along `dir`;
+ * `width` sets its softness and `strength` its peak flare. Premultiplied out. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float4 font_color;   /* base text fill                     */
+uniform float4 light_color;  /* sweeping highlight tint            */
+uniform float  time;
+uniform float  strength;     /* peak flare strength                */
+uniform float  speed;        /* sweeps per second                  */
+uniform float  width;        /* band width (fraction of sweep)     */
+uniform float2 dir;          /* sweep direction (unit-ish)         */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSSpotlight(VertData v) : TARGET
+{
+	float cov = image.Sample(maskSampler, v.uv).r;
+
+	/* Project uv onto the sweep direction; remap so the band wraps. */
+	float p = dot(v.uv, normalize(dir + float2(1e-5, 0.0)));
+	float center = frac(time * speed);
+	float d = abs(frac(p - center + 0.5) - 0.5);          /* wrapped dist */
+	float band = exp(-(d * d) / (2.0 * width * width));    /* gaussian     */
+
+	float flare = band * strength;
+
+	float3 base = font_color.rgb * (1.0 + flare * 0.4);
+	float3 col = base + light_color.rgb * flare;
+
+	float a = cov * font_color.a;
+	return float4(col * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSSpotlight(v);
+	}
+}

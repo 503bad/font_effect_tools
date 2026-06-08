@@ -1,0 +1,118 @@
+/* Electric arc — jagged discharges crackle in the gaps between the letters.
+ * The host passes the inter-letter gap x-positions (`arc_x`, packed as float4[4]
+ * = 16 floats) and the vertical text band (`span`). Each gap hosts a jittering
+ * vertical bolt that flickers on and off (バチバチ). The upright text is drawn
+ * in `font_color`; the arcs add light (glow) and a halo (bloom). Premult out. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float2 canvas;       /* mask size in px                    */
+uniform float4 font_color;   /* upright text fill                  */
+uniform float4 arc_color;    /* discharge tint                     */
+uniform float  time;
+uniform float  glow;         /* arc core brightness                */
+uniform float  bloom;        /* halo strength                      */
+uniform float  rate;         /* discharges per second              */
+uniform float  random;       /* jaggedness / timing randomness     */
+uniform float  amp;          /* bolt jag amplitude in px           */
+uniform float  arc_count;    /* number of active gaps              */
+uniform float2 span;         /* (text_top, text_bottom) in px      */
+uniform float4 arc_x[4];     /* gap x-positions in px (16 packed)   */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float hash11(float x)
+{
+	float s = sin(x * 12.9898) * 43758.5453;
+	return s - floor(s);
+}
+
+float gap_x(int i)
+{
+	float4 v = arc_x[i / 4];
+	int m = i - (i / 4) * 4;
+	if (m == 0) return v.x;
+	if (m == 1) return v.y;
+	if (m == 2) return v.z;
+	return v.w;
+}
+
+float4 PSArc(VertData v) : TARGET
+{
+	float2 px = v.uv * canvas;
+
+	float top = span.x;
+	float bot = span.y;
+	/* Vertical envelope: full strength across the text band, soft ends. */
+	float vmask = smoothstep(top - 6.0, top + 6.0, px.y) *
+		      (1.0 - smoothstep(bot - 6.0, bot + 6.0, px.y));
+
+	float lum = 0.0;
+	float halo = 0.0;
+	int count = (int)(arc_count + 0.5);
+	for (int i = 0; i < 16; i++) {
+		if (i >= count)
+			break;
+
+		float gx = gap_x(i);
+
+		/* Jagged horizontal offset from layered sines + noise. */
+		float jag = sin(px.y * 0.15 + (float)i * 2.3 + time * 7.0) * 0.6 +
+			    sin(px.y * 0.41 + (float)i * 5.7 + time * 13.0) * 0.4;
+		float jit = (hash11((float)i + floor(px.y * 0.25) +
+				     floor(time * 40.0)) - 0.5) * 2.0;
+		jag = (jag + jit * random) * amp;
+
+		float d = abs(px.x - (gx + jag));
+
+		/* On/off bursts: a slot per gap hashed against time*rate. */
+		float slot = floor(time * rate + (float)i * 0.37);
+		float on = step(0.45, hash11((float)i * 9.1 + slot));
+		float crackle = 0.5 + 0.5 * sin(time * 80.0 + (float)i * 3.0);
+		float active = on * crackle * vmask;
+
+		float core = exp(-d * d / (2.0 * 1.6 * 1.6));
+		float wide = exp(-d * d / (2.0 * (4.0 + bloom * 6.0) *
+					   (4.0 + bloom * 6.0)));
+		lum += core * active;
+		halo += wide * active;
+	}
+
+	float3 arc = arc_color.rgb * (lum * (0.6 + glow) + halo * bloom);
+
+	/* Upright text on top. */
+	float cov = image.Sample(maskSampler, v.uv).r;
+	float a = cov * font_color.a;
+	float3 base = font_color.rgb * a;
+
+	float3 rgb = base + arc;
+	float outA = saturate(a + (lum + halo * bloom) * 0.6);
+	return float4(rgb, outA);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSArc(v);
+	}
+}

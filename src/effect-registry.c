@@ -11,6 +11,19 @@ extern const struct text_effect fx_bloom;
 extern const struct text_effect fx_water;
 extern const struct text_effect fx_glitch;
 extern const struct text_effect fx_watersurface;
+extern const struct text_effect fx_spotlight;
+extern const struct text_effect fx_chroma;
+extern const struct text_effect fx_godray;
+extern const struct text_effect fx_scanline;
+extern const struct text_effect fx_arc;
+extern const struct text_effect fx_circuit;
+extern const struct text_effect fx_sparkle;
+extern const struct text_effect fx_dust;
+extern const struct text_effect fx_imagedeco;
+extern const struct text_effect fx_depth3d;
+extern const struct text_effect fx_cube;
+extern const struct text_effect fx_sidebound;
+extern const struct text_effect fx_hop;
 
 static const struct text_effect *const k_effects[] = {
 	&fx_flame,
@@ -20,6 +33,19 @@ static const struct text_effect *const k_effects[] = {
 	&fx_water,
 	&fx_glitch,
 	&fx_watersurface,
+	&fx_spotlight,
+	&fx_chroma,
+	&fx_godray,
+	&fx_scanline,
+	&fx_arc,
+	&fx_circuit,
+	&fx_sparkle,
+	&fx_dust,
+	&fx_imagedeco,
+	&fx_depth3d,
+	&fx_cube,
+	&fx_sidebound,
+	&fx_hop,
 };
 
 const struct text_effect *const *fx_registry(size_t *count)

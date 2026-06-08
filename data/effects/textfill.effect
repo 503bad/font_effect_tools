@@ -1,0 +1,42 @@
+/* Flat text fill — paints the coverage mask in a single colour. Shared by the
+ * particle/3D/per-character effects to draw the base text under their overlay.
+ * Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+uniform float4 font_color;   /* text fill                          */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSFill(VertData v) : TARGET
+{
+	float cov = image.Sample(maskSampler, v.uv).r;
+	float a = cov * font_color.a;
+	return float4(font_color.rgb * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSFill(v);
+	}
+}

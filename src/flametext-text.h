@@ -11,6 +11,15 @@ extern "C" {
 struct gs_texture;
 typedef struct gs_texture gs_texture_t;
 
+/* Canvas-space rectangle (pixels) of a single rasterized glyph within the
+ * shared mask texture. Lets per-character effects draw and animate each glyph
+ * as its own quad sampling its sub-region of the one coverage texture. Empty
+ * glyphs (spaces) are not included. Owned by the mask. */
+struct flametext_glyph {
+	float x, y;  /* top-left of the glyph bitmap on the canvas */
+	float w, h;  /* glyph bitmap size in pixels                */
+};
+
 /* A rasterized text "coverage" mask used as the source shape for the flame
  * shader and the spark emitter.
  *
@@ -39,6 +48,12 @@ struct flametext_mask {
 	 * Length == `width`. Lets effects find the genuine lower tips of the
 	 * glyphs (and avoid emitting from blank gaps). Owned by the mask. */
 	int *bottom_y;
+
+	/* Per visible glyph, in left-to-right order. Used by per-character
+	 * effects (bounce-in, hop, ...) to move each letter independently.
+	 * Length == `glyph_count` (may be 0). Owned by the mask. */
+	struct flametext_glyph *glyphs;
+	size_t glyph_count;
 };
 
 /* Rasterize utf-8 text with the given font file at the given pixel size into
@@ -50,7 +65,9 @@ struct flametext_mask {
  *
  * `bottom_pad` is the empty room (in pixels) reserved below the text; pass 0
  * to use a small default. Effects that need drops/embers to travel downward
- * ask for a larger value.
+ * ask for a larger value. `extra_left`/`extra_right`/`extra_top` add room on
+ * the respective sides beyond the host defaults (pass 0 for none); effects whose
+ * output streams sideways or upward (god rays, etc.) ask for more.
  *
  * Returns NULL on failure. The caller owns the result and frees it with
  * flametext_mask_free (also under the graphics lock). */
@@ -59,7 +76,10 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t pixel_size,
 					    bool bold,
 					    bool italic,
-					    uint32_t bottom_pad);
+					    uint32_t bottom_pad,
+					    uint32_t extra_left,
+					    uint32_t extra_right,
+					    uint32_t extra_top);
 
 /* Free a mask. Must be called while holding the OBS graphics lock. */
 void flametext_mask_free(struct flametext_mask *mask);

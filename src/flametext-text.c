@@ -88,7 +88,10 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t pixel_size,
 					    bool bold,
 					    bool italic,
-					    uint32_t bottom_pad)
+					    uint32_t bottom_pad,
+					    uint32_t extra_left,
+					    uint32_t extra_right,
+					    uint32_t extra_top)
 {
 	if (!utf8_text || !utf8_text[0] || !font_path || !font_path[0] ||
 	    pixel_size == 0)
@@ -187,7 +190,9 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	 * by the caller (effects that drip downward ask for more); fall back to
 	 * a small default. */
 	const int pad_x = (int)(pixel_size * 0.8f);
-	const int pad_top = (int)(pixel_size * 2.4f);
+	const int pad_left = pad_x + (int)extra_left;
+	const int pad_right = pad_x + (int)extra_right;
+	const int pad_top = (int)(pixel_size * 2.4f) + (int)extra_top;
 	const int pad_bottom = bottom_pad > 0 ? (int)bottom_pad
 					      : (int)(pixel_size * 0.6f);
 
@@ -196,16 +201,29 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	if (text_h < 1)
 		text_h = 1;
 
-	int cw = text_w + pad_x * 2;
+	int cw = text_w + pad_left + pad_right;
 	int ch = text_h + pad_top + pad_bottom;
 
 	/* baseline so the topmost text pixel lands at y = pad_top. */
 	float baseline_y = (float)(pad_top - min_top);
 
+	/* Capture each visible glyph's canvas rectangle so per-character effects
+	 * can address letters individually. Rect math mirrors blit_max(). */
+	struct flametext_glyph *glyphs =
+		bmalloc(sizeof(*glyphs) * (tmp_count ? tmp_count : 1));
+	size_t glyph_count = 0;
+
 	unsigned char *canvas = bzalloc((size_t)cw * ch);
 	for (size_t i = 0; i < tmp_count; ++i) {
-		if (tmp[i].gray)
-			blit_max(canvas, cw, ch, &tmp[i], pad_x, baseline_y);
+		if (tmp[i].gray) {
+			blit_max(canvas, cw, ch, &tmp[i], pad_left, baseline_y);
+			struct flametext_glyph *gl = &glyphs[glyph_count++];
+			gl->x = (float)(pad_left + (int)tmp[i].pen_x +
+					tmp[i].left);
+			gl->y = baseline_y - (float)tmp[i].top;
+			gl->w = (float)tmp[i].w;
+			gl->h = (float)tmp[i].h;
+		}
 		bfree(tmp[i].gray);
 	}
 	bfree(tmp);
@@ -232,6 +250,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	if (!tex) {
 		obs_log(LOG_ERROR, "gs_texture_create failed for text mask");
 		bfree(bottom_y);
+		bfree(glyphs);
 		return NULL;
 	}
 
@@ -239,11 +258,13 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	m->tex = tex;
 	m->width = (uint32_t)cw;
 	m->height = (uint32_t)ch;
-	m->text_left = (float)pad_x;
-	m->text_right = (float)(pad_x + text_w);
+	m->text_left = (float)pad_left;
+	m->text_right = (float)(pad_left + text_w);
 	m->text_top = (float)pad_top;
 	m->text_bottom = (float)(pad_top + text_h);
 	m->bottom_y = bottom_y;
+	m->glyphs = glyphs;
+	m->glyph_count = glyph_count;
 	return m;
 }
 
@@ -254,5 +275,6 @@ void flametext_mask_free(struct flametext_mask *mask)
 	if (mask->tex)
 		gs_texture_destroy(mask->tex);
 	bfree(mask->bottom_y);
+	bfree(mask->glyphs);
 	bfree(mask);
 }

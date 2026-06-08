@@ -1,0 +1,91 @@
+/* Chromatic glow — samples the coverage mask at per-channel offsets (chromatic
+ * aberration) and tints the glyphs with a hue that rotates over time. A soft
+ * halo (glow) is added around the letters. Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+
+uniform float2 canvas;       /* mask size in px (uv <-> px)        */
+uniform float4 font_color;   /* base text fill                     */
+uniform float  time;
+uniform float  intensity;    /* hue tint amount / vividness        */
+uniform float  speed;        /* hue rotation speed                 */
+uniform float  split;        /* RGB split distance in px           */
+uniform float  glow;         /* halo strength                      */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float3 hsv2rgb(float h, float s, float val)
+{
+	float3 p = abs(frac(h + float3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+	return val * lerp(float3(1.0, 1.0, 1.0), saturate(p - 1.0), s);
+}
+
+float cov_at(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSChroma(VertData v) : TARGET
+{
+	/* Split direction rotates slowly so the fringes drift. */
+	float a = time * speed * 6.28318;
+	float2 off = float2(cos(a), sin(a)) * (split / canvas);
+
+	float covR = cov_at(v.uv - off);
+	float covG = cov_at(v.uv);
+	float covB = cov_at(v.uv + off);
+
+	/* Rotating hue blended with the chosen font colour. */
+	float hue = frac(time * speed);
+	float3 hueCol = hsv2rgb(hue, 1.0, 1.0);
+	float3 base = lerp(font_color.rgb, hueCol, intensity);
+
+	float3 body = float3(base.r * covR, base.g * covG, base.b * covB);
+	float alpha = max(max(covR, covG), covB) * font_color.a;
+
+	/* Soft halo from a small golden-angle blur of the coverage. */
+	float radius = max(split * 2.0 + 6.0, 1.0);
+	const int N = 12;
+	const float GA = 2.39996323;
+	float blur = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);
+		float ang = fi * GA;
+		float2 d = float2(cos(ang), sin(ang)) * (rr * radius);
+		blur += cov_at(v.uv + d / canvas) * exp(-rr * rr * 2.0);
+	}
+	blur /= (float)N;
+	float3 halo = hueCol * blur * glow;
+
+	float3 rgb = body * alpha + halo;
+	float outA = saturate(alpha + blur * glow * 0.5);
+	return float4(rgb, outA);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSChroma(v);
+	}
+}
