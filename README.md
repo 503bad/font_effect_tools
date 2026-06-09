@@ -11,6 +11,45 @@
 OBS では **ソースの追加 →「Font Effect Tools」** に表示されます（内部 id は
 `flame_text_source`）。
 
+## パッケージの構成
+
+`dist` インストールコンポーネント（配布 ZIP）は、配布するそのままのツリーを
+出力します。
+
+```
+package/
+├─ bin/
+│   ├─ font-effect-tools.dll
+│   └─ font-effect-tools.pdb
+└─ font-effect-tools/
+    ├─ effects/{flame,spark,rainbow,neon,bloom,waterdrop,glitch,watersurface}.effect
+    └─ locale/{en-US,ja-JP}.ini
+```
+
+## OBS へのインストール
+
+モジュール名は `font-effect-tools` なので、OBS データディレクトリ名も
+**必ず** `font-effect-tools`（DLL のベース名と一致）にします。2 つの部分を
+次のように配置します。
+
+- `bin/font-effect-tools.dll` → `<obs>/obs-plugins/64bit/font-effect-tools.dll`
+- `font-effect-tools/`（effects + locale） →
+  `<obs>/data/obs-plugins/font-effect-tools/`
+
+（`<obs>` は OBS のインストール先。例: `C:\Program Files\obs-studio`。）配置後は
+OBS を完全に再起動してください。
+
+## クレジット表記のお願い
+
+配信や動画で利用する際は、概要欄などに以下のクレジットをお願いします。
+
+```
+■Font Effect Tools
+開発：ヘヴィメタルバンド 503 bad gateway
+Youtube：https://youtube.com/@503badgateway
+X（伊達五十嵐）：https://x.com/503_bad
+```
+
 ## できること
 任意のテキストを、システムフォント（OBS のフォントピッカーで選択）で描画します。
 以下一例です。
@@ -304,33 +343,6 @@ cmake --install build_x64 --config RelWithDebInfo --component dist --prefix pack
 > `architecture` を手元の SDK（例 `x64,version=10.0.26100`）に上書きした
 > `CMakeUserPresets.json`（git 管理外）を用意し、`--preset local` でビルド
 > してください。
-
-### パッケージの構成
-
-`dist` インストールコンポーネントは、配布するそのままのツリーを出力します。
-
-```
-package/
-├─ bin/
-│   ├─ font-effect-tools.dll
-│   └─ font-effect-tools.pdb
-└─ font-effect-tools/
-    ├─ effects/{flame,spark,rainbow,neon,bloom,waterdrop,glitch,watersurface}.effect
-    └─ locale/{en-US,ja-JP}.ini
-```
-
-### OBS へのインストール
-
-モジュール名は `font-effect-tools` なので、OBS データディレクトリ名も
-**必ず** `font-effect-tools`（DLL のベース名と一致）にします。2 つの部分を
-次のように配置します。
-
-- `bin/font-effect-tools.dll` → `<obs>/obs-plugins/64bit/font-effect-tools.dll`
-- `font-effect-tools/`（effects + locale） →
-  `<obs>/data/obs-plugins/font-effect-tools/`
-
-（`<obs>` は OBS のインストール先。例: `C:\Program Files\obs-studio`。）配置後は
-OBS を完全に再起動してください。
 
 ## ライセンス（GPLv2）— ソース提供義務
 
