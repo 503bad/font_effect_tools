@@ -1,0 +1,61 @@
+/* Text outline — dilates the coverage mask by `width` pixels and paints the
+ * grown silhouette in a flat colour. Drawn *before* an effect's own fill (with
+ * premultiplied blending) so the fill covers the interior and only the ring
+ * sticking out past the glyphs remains visible as a stroke.
+ *
+ * The dilation is a max() of the coverage over a golden-angle ("sunflower")
+ * disc of taps, which gives uniform area coverage and a smooth grown edge.
+ * Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;        /* GS_R8 coverage mask; .r = coverage */
+uniform float2 canvas;          /* mask size in pixels (uv <-> px)    */
+uniform float4 outline_color;   /* stroke colour (alpha scales it)    */
+uniform float  width;           /* stroke half-width in pixels        */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSOutline(VertData v) : TARGET
+{
+	float radius = max(width, 0.5);
+
+	const int   N  = 32;
+	const float GA = 2.39996323;   /* golden angle (radians) */
+	float dil = image.Sample(maskSampler, v.uv).r;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N);        /* 0..1, area-uniform */
+		float a  = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * radius);
+		dil = max(dil, image.Sample(maskSampler, v.uv + off / canvas).r);
+	}
+
+	float alpha = dil * outline_color.a;
+	return float4(outline_color.rgb * alpha, alpha);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSOutline(v);
+	}
+}

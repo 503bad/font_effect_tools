@@ -55,9 +55,10 @@ static uint32_t utf8_next(const char **p)
 struct tmp_glyph {
 	unsigned char *gray;   /* w*h, owned */
 	int w, h;
-	float pen_x;           /* advance origin along the baseline */
+	float pen_x;           /* advance origin along the line baseline */
 	int left;              /* bitmap_left  (px right of pen)     */
 	int top;               /* bitmap_top   (px above baseline)   */
+	int line;              /* line index (0-based) for layout    */
 };
 
 /* Composite one glyph into the canvas using max-blend so overlapping coverage
@@ -88,6 +89,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t pixel_size,
 					    bool bold,
 					    bool italic,
+					    int line_spacing,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,
@@ -119,25 +121,46 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		FT_Set_Transform(face, &shear, NULL);
 	}
 
-	/* Count codepoints to size the temp glyph array. */
+	/* Line pitch (baseline-to-baseline). Auto uses FreeType's recommended
+	 * line spacing for the face; a positive line_spacing overrides it with an
+	 * explicit pixel value. */
+	int pitch = line_spacing > 0 ? line_spacing
+				     : (int)(face->size->metrics.height >> 6);
+	if (pitch < 1)
+		pitch = (int)pixel_size;
+
+	/* Count codepoints (upper bound on glyphs) and lines (split on '\n'). */
 	size_t cap = 0;
-	for (const char *p = utf8_text; *p;) {
-		if (utf8_next(&p) == 0)
+	int line_total = 1;
+	for (const char *q = utf8_text; *q;) {
+		uint32_t cp = utf8_next(&q);
+		if (cp == 0)
 			break;
-		++cap;
+		if (cp == '\n')
+			++line_total;
+		else if (cp != '\r')
+			++cap;
 	}
 	struct tmp_glyph *tmp = bzalloc(sizeof(*tmp) * (cap + 1));
 	size_t tmp_count = 0;
+	float *line_w = bzalloc(sizeof(float) * (size_t)line_total);
 
 	float pen_x = 0.0f;
-	int min_top = 0;     /* most negative top (above baseline)   */
-	int max_bottom = 0;  /* most positive bottom (below baseline) */
+	int cur_line = 0;
 
 	const char *p = utf8_text;
 	while (*p) {
 		uint32_t cp = utf8_next(&p);
 		if (cp == 0)
 			break;
+		if (cp == '\r')
+			continue;
+		if (cp == '\n') {
+			line_w[cur_line] = pen_x;
+			++cur_line;
+			pen_x = 0.0f;
+			continue;
+		}
 		FT_UInt gi = FT_Get_Char_Index(face, cp);
 		if (FT_Load_Glyph(face, gi, FT_LOAD_DEFAULT) != 0)
 			continue;
@@ -158,30 +181,49 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		g->pen_x = pen_x;
 		g->left = face->glyph->bitmap_left;
 		g->top = face->glyph->bitmap_top;
+		g->line = cur_line;
 		if (w > 0 && h > 0) {
 			g->gray = bmalloc((size_t)w * h);
 			for (int y = 0; y < h; ++y)
 				memcpy(g->gray + (size_t)y * w,
 				       bm->buffer + (size_t)y * bm->pitch, w);
-
-			int top = -g->top;          /* canvas-up is negative */
-			int bottom = top + h;
-			if (top < min_top)
-				min_top = top;
-			if (bottom > max_bottom)
-				max_bottom = bottom;
 		}
 		++tmp_count;
 		pen_x += (float)(face->glyph->advance.x >> 6);
 	}
+	line_w[cur_line] = pen_x;
 
 	FT_Done_Face(face);
 	FT_Done_FreeType(lib);
 
-	if (tmp_count == 0 || pen_x < 1.0f) {
+	/* Widest line drives the canvas width; the block's vertical extent is
+	 * measured in baseline-local space where line i's baseline sits at
+	 * i*pitch and a glyph's top pixel (canvas-down) is i*pitch - bitmap_top. */
+	float max_line_w = 0.0f;
+	for (int i = 0; i < line_total; ++i)
+		if (line_w[i] > max_line_w)
+			max_line_w = line_w[i];
+
+	int min_y = 0;
+	int max_y = 0;
+	bool any = false;
+	for (size_t i = 0; i < tmp_count; ++i) {
+		if (!tmp[i].gray)
+			continue;
+		int top = tmp[i].line * pitch - tmp[i].top;
+		int bottom = top + tmp[i].h;
+		if (!any || top < min_y)
+			min_y = top;
+		if (!any || bottom > max_y)
+			max_y = bottom;
+		any = true;
+	}
+
+	if (tmp_count == 0 || !any || max_line_w < 1.0f) {
 		for (size_t i = 0; i < tmp_count; ++i)
 			bfree(tmp[i].gray);
 		bfree(tmp);
+		bfree(line_w);
 		return NULL;
 	}
 
@@ -196,19 +238,19 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	const int pad_bottom = bottom_pad > 0 ? (int)bottom_pad
 					      : (int)(pixel_size * 0.6f);
 
-	int text_w = (int)(pen_x + 0.5f);
-	int text_h = max_bottom - min_top;
+	int text_w = (int)(max_line_w + 0.5f);
+	int text_h = max_y - min_y;
 	if (text_h < 1)
 		text_h = 1;
 
 	int cw = text_w + pad_left + pad_right;
 	int ch = text_h + pad_top + pad_bottom;
 
-	/* baseline so the topmost text pixel lands at y = pad_top. */
-	float baseline_y = (float)(pad_top - min_top);
-
 	/* Capture each visible glyph's canvas rectangle so per-character effects
-	 * can address letters individually. Rect math mirrors blit_max(). */
+	 * can address letters individually. Rect math mirrors blit_max(). Lines
+	 * are centered horizontally; line i's baseline is placed at
+	 * pad_top - min_y + i*pitch so the topmost pixel of the whole block lands
+	 * at y = pad_top. */
 	struct flametext_glyph *glyphs =
 		bmalloc(sizeof(*glyphs) * (tmp_count ? tmp_count : 1));
 	size_t glyph_count = 0;
@@ -216,9 +258,14 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	unsigned char *canvas = bzalloc((size_t)cw * ch);
 	for (size_t i = 0; i < tmp_count; ++i) {
 		if (tmp[i].gray) {
-			blit_max(canvas, cw, ch, &tmp[i], pad_left, baseline_y);
+			int line = tmp[i].line;
+			int origin_x = pad_left +
+				(int)((max_line_w - line_w[line]) * 0.5f);
+			float baseline_y =
+				(float)(pad_top - min_y + line * pitch);
+			blit_max(canvas, cw, ch, &tmp[i], origin_x, baseline_y);
 			struct flametext_glyph *gl = &glyphs[glyph_count++];
-			gl->x = (float)(pad_left + (int)tmp[i].pen_x +
+			gl->x = (float)(origin_x + (int)tmp[i].pen_x +
 					tmp[i].left);
 			gl->y = baseline_y - (float)tmp[i].top;
 			gl->w = (float)tmp[i].w;
@@ -227,6 +274,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		bfree(tmp[i].gray);
 	}
 	bfree(tmp);
+	bfree(line_w);
 
 	/* Bottom contour: lowest inked pixel per column (-1 = empty column).
 	 * "Inked" uses a low coverage threshold so faint antialiased edges do

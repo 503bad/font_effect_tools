@@ -1,5 +1,6 @@
 #include "effect-cube.h"
 #include "flametext-sprites.h" /* fx_textfill_* */
+#include "flametext-outline.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -11,15 +12,21 @@
 
 #define DEFAULT_CUBE_FONT 0xFFFFFFFFu /* white #FFFFFF       */
 #define DEFAULT_CUBE_SIDE 0xFF707070u /* shaded face #707070  */
+#define DEFAULT_OUTLINE_COLOR 0xFF000000u /* opaque black     */
 #define CUBE_PI 3.14159265f
 
 struct cube_state {
 	gs_effect_t *fill;
+	gs_effect_t *outline;
 
 	uint32_t font_color;
 	uint32_t side_color;
 	float    speed;
 	bool     reverse; /* ping-pong (unfold then reverse) */
+
+	bool     outline_on;
+	float    outline_width;
+	uint32_t outline_color;
 };
 
 static void unpack_color(uint32_t c, float rgba[4])
@@ -42,6 +49,8 @@ static void cube_destroy(void *data)
 		return;
 	if (s->fill)
 		gs_effect_destroy(s->fill);
+	if (s->outline)
+		gs_effect_destroy(s->outline);
 	bfree(s);
 }
 
@@ -51,6 +60,7 @@ static void cube_load_graphics(void *data)
 	s->fill = fx_textfill_load();
 	if (!s->fill)
 		obs_log(LOG_ERROR, "cube: failed to load textfill.effect");
+	s->outline = fx_outline_load();
 }
 
 static void cube_update(void *data, obs_data_t *settings)
@@ -60,6 +70,11 @@ static void cube_update(void *data, obs_data_t *settings)
 	s->side_color = (uint32_t)obs_data_get_int(settings, "cube_side");
 	s->speed = (float)obs_data_get_double(settings, "cube_speed");
 	s->reverse = obs_data_get_bool(settings, "cube_reverse");
+	s->outline_on = obs_data_get_bool(settings, "cube_outline");
+	s->outline_width =
+		(float)obs_data_get_double(settings, "cube_outline_width");
+	s->outline_color =
+		(uint32_t)obs_data_get_int(settings, "cube_outline_color");
 }
 
 static void cube_render(void *data, const struct fx_render_ctx *ctx)
@@ -84,9 +99,10 @@ static void cube_render(void *data, const struct fx_render_ctx *ctx)
 	float cy = (mask->text_top + mask->text_bottom) * 0.5f;
 	float L = mask->text_bottom - mask->text_top;
 
-	float frgba[4], srgba[4];
+	float frgba[4], srgba[4], orgba[4];
 	unpack_color(s->font_color, frgba);
 	unpack_color(s->side_color, srgba);
+	unpack_color(s->outline_color, orgba);
 
 	/* Compute facing for the four faces and draw back-to-front. */
 	float cf[4];
@@ -120,6 +136,10 @@ static void cube_render(void *data, const struct fx_render_ctx *ctx)
 				  a + (float)k * (CUBE_PI * 0.5f));
 		gs_matrix_translate3f(0.0f, 0.0f, L * 0.5f);
 		gs_matrix_translate3f(-cx, -cy, 0.0f);
+		if (s->outline_on && s->outline)
+			fx_outline_render_full(s->outline, mask->tex,
+					       ctx->width, ctx->height, orgba,
+					       s->outline_width);
 		fx_textfill_render(s->fill, mask->tex, rgba);
 		gs_matrix_pop();
 	}
@@ -135,6 +155,11 @@ static void cube_properties(obs_properties_t *p)
 		obs_module_text("CubeSpeed"), 0.1, 3.0, 0.05);
 	obs_properties_add_bool(p, "cube_reverse",
 		obs_module_text("CubeReverse"));
+	obs_properties_add_bool(p, "cube_outline", obs_module_text("OutlineShow"));
+	obs_properties_add_float_slider(p, "cube_outline_width",
+		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
+	obs_properties_add_color_alpha(p, "cube_outline_color",
+		obs_module_text("OutlineColor"));
 }
 
 static void cube_defaults(obs_data_t *settings)
@@ -143,6 +168,10 @@ static void cube_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "cube_side", DEFAULT_CUBE_SIDE);
 	obs_data_set_default_double(settings, "cube_speed", 0.6);
 	obs_data_set_default_bool(settings, "cube_reverse", false);
+	obs_data_set_default_bool(settings, "cube_outline", false);
+	obs_data_set_default_double(settings, "cube_outline_width", 4.0);
+	obs_data_set_default_int(settings, "cube_outline_color",
+				 DEFAULT_OUTLINE_COLOR);
 }
 
 const struct text_effect fx_cube = {

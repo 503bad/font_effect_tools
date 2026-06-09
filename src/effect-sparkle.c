@@ -1,5 +1,6 @@
 #include "effect-sparkle.h"
 #include "flametext-sprites.h"
+#include "flametext-outline.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -11,12 +12,14 @@
 
 #define DEFAULT_SPK_FONT  0xFFFFFFFFu /* white #FFFFFF        */
 #define DEFAULT_SPK_COLOR 0xFFE9FFFFu /* warm white #FFFFE9   */
+#define DEFAULT_OUTLINE_COLOR 0xFF000000u /* opaque black     */
 #define SPK_CAPACITY 2048
 #define SPK_PI 3.14159265f
 
 struct sparkle_state {
 	gs_effect_t *sprite;
 	gs_effect_t *fill;
+	gs_effect_t *outline;
 	struct fx_sprite_system *sys;
 
 	uint32_t font_color;
@@ -25,6 +28,10 @@ struct sparkle_state {
 	float    size;    /* size multiplier */
 	float    speed;   /* twinkle speed   */
 	float    bloom;
+
+	bool     outline_on;
+	float    outline_width;
+	uint32_t outline_color;
 
 	float    text_h; /* cached from mask for sizing */
 };
@@ -53,6 +60,8 @@ static void sparkle_destroy(void *data)
 		gs_effect_destroy(s->sprite);
 	if (s->fill)
 		gs_effect_destroy(s->fill);
+	if (s->outline)
+		gs_effect_destroy(s->outline);
 	fx_sprites_destroy(s->sys);
 	bfree(s);
 }
@@ -69,6 +78,9 @@ static void sparkle_load_graphics(void *data)
 	}
 	bfree(path);
 	s->fill = fx_textfill_load();
+	if (!s->fill)
+		obs_log(LOG_ERROR, "sparkle: failed to load textfill.effect");
+	s->outline = fx_outline_load();
 }
 
 static void sparkle_update(void *data, obs_data_t *settings)
@@ -80,6 +92,11 @@ static void sparkle_update(void *data, obs_data_t *settings)
 	s->size = (float)obs_data_get_double(settings, "spk_size");
 	s->speed = (float)obs_data_get_double(settings, "spk_speed");
 	s->bloom = (float)obs_data_get_double(settings, "spk_bloom");
+	s->outline_on = obs_data_get_bool(settings, "spk_outline");
+	s->outline_width =
+		(float)obs_data_get_double(settings, "spk_outline_width");
+	s->outline_color =
+		(uint32_t)obs_data_get_int(settings, "spk_outline_color");
 }
 
 static void sparkle_reset(void *data)
@@ -177,6 +194,13 @@ static void sparkle_render(void *data, const struct fx_render_ctx *ctx)
 	if (!mask || !mask->tex)
 		return;
 
+	if (s->outline_on && s->outline) {
+		float oc[4];
+		unpack_color(s->outline_color, oc);
+		fx_outline_render_full(s->outline, mask->tex, ctx->width,
+				       ctx->height, oc, s->outline_width);
+	}
+
 	if (s->fill) {
 		float rgba[4];
 		unpack_color(s->font_color, rgba);
@@ -206,6 +230,11 @@ static void sparkle_properties(obs_properties_t *p)
 		obs_module_text("SpkSpeed"), 0.2, 3.0, 0.05);
 	obs_properties_add_float_slider(p, "spk_bloom",
 		obs_module_text("SpkBloom"), 0.0, 3.0, 0.05);
+	obs_properties_add_bool(p, "spk_outline", obs_module_text("OutlineShow"));
+	obs_properties_add_float_slider(p, "spk_outline_width",
+		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
+	obs_properties_add_color_alpha(p, "spk_outline_color",
+		obs_module_text("OutlineColor"));
 }
 
 static void sparkle_defaults(obs_data_t *settings)
@@ -216,6 +245,10 @@ static void sparkle_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "spk_size", 1.0);
 	obs_data_set_default_double(settings, "spk_speed", 1.0);
 	obs_data_set_default_double(settings, "spk_bloom", 1.0);
+	obs_data_set_default_bool(settings, "spk_outline", false);
+	obs_data_set_default_double(settings, "spk_outline_width", 4.0);
+	obs_data_set_default_int(settings, "spk_outline_color",
+				 DEFAULT_OUTLINE_COLOR);
 }
 
 const struct text_effect fx_sparkle = {

@@ -63,6 +63,10 @@ struct flametext_mask {
  * gs_texture_create runs inside this function, so it MUST be called while
  * holding the OBS graphics lock (obs_enter_graphics()).
  *
+ * Text is laid out across multiple lines on embedded '\n' characters, with each
+ * line centered horizontally. `line_spacing` is the baseline-to-baseline pitch
+ * in pixels; pass <= 0 to use the font's natural line height (auto).
+ *
  * `bottom_pad` is the empty room (in pixels) reserved below the text; pass 0
  * to use a small default. Effects that need drops/embers to travel downward
  * ask for a larger value. `extra_left`/`extra_right`/`extra_top` add room on
@@ -76,6 +80,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t pixel_size,
 					    bool bold,
 					    bool italic,
+					    int line_spacing,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,

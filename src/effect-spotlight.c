@@ -1,4 +1,5 @@
 #include "effect-spotlight.h"
+#include "flametext-outline.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -12,10 +13,12 @@
 
 #define DEFAULT_SPOT_FONT  0xFFFFFFFFu /* white #FFFFFF                  */
 #define DEFAULT_SPOT_LIGHT 0xFFFFFFFFu /* white sweep                    */
+#define DEFAULT_OUTLINE_COLOR 0xFF000000u /* opaque black                */
 
 /* Per-instance state for the spotlight sweep effect. */
 struct spotlight_state {
 	gs_effect_t *effect;
+	gs_effect_t *outline;
 
 	uint32_t font_color;  /* base text fill (OBS 0xAABBGGRR) */
 	uint32_t light_color; /* sweeping highlight tint         */
@@ -23,6 +26,10 @@ struct spotlight_state {
 	float    speed;       /* sweeps per second               */
 	float    width;       /* band width (fraction)           */
 	float    angle;       /* sweep direction in degrees       */
+
+	bool     outline_on;
+	float    outline_width;
+	uint32_t outline_color;
 };
 
 /* Decompose an OBS 0xAABBGGRR color into normalized rgba. */
@@ -46,6 +53,8 @@ static void spotlight_destroy(void *data)
 		return;
 	if (s->effect)
 		gs_effect_destroy(s->effect);
+	if (s->outline)
+		gs_effect_destroy(s->outline);
 	bfree(s);
 }
 
@@ -60,6 +69,7 @@ static void spotlight_load_graphics(void *data)
 				"failed to load spotlight.effect (%s)", path);
 	}
 	bfree(path);
+	s->outline = fx_outline_load();
 }
 
 static void spotlight_update(void *data, obs_data_t *settings)
@@ -71,6 +81,11 @@ static void spotlight_update(void *data, obs_data_t *settings)
 	s->speed = (float)obs_data_get_double(settings, "spot_speed");
 	s->width = (float)obs_data_get_double(settings, "spot_width");
 	s->angle = (float)obs_data_get_double(settings, "spot_angle");
+	s->outline_on = obs_data_get_bool(settings, "spot_outline");
+	s->outline_width =
+		(float)obs_data_get_double(settings, "spot_outline_width");
+	s->outline_color =
+		(uint32_t)obs_data_get_int(settings, "spot_outline_color");
 }
 
 static void set_color(gs_effect_t *e, const char *name, uint32_t c)
@@ -119,6 +134,13 @@ static void spotlight_render(void *data, const struct fx_render_ctx *ctx)
 		gs_effect_set_vec2(p_dir, &d);
 	}
 
+	if (s->outline_on && s->outline) {
+		float oc[4];
+		unpack_color(s->outline_color, oc);
+		fx_outline_render_full(s->outline, mask->tex, ctx->width,
+				       ctx->height, oc, s->outline_width);
+	}
+
 	/* Premultiplied: the flare adds light over the base fill. */
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
@@ -141,6 +163,11 @@ static void spotlight_properties(obs_properties_t *p)
 		obs_module_text("SpotWidth"), 0.02, 0.5, 0.01);
 	obs_properties_add_float_slider(p, "spot_angle",
 		obs_module_text("SpotAngle"), 0.0, 360.0, 1.0);
+	obs_properties_add_bool(p, "spot_outline", obs_module_text("OutlineShow"));
+	obs_properties_add_float_slider(p, "spot_outline_width",
+		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
+	obs_properties_add_color_alpha(p, "spot_outline_color",
+		obs_module_text("OutlineColor"));
 }
 
 static void spotlight_defaults(obs_data_t *settings)
@@ -151,6 +178,10 @@ static void spotlight_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "spot_speed", 0.6);
 	obs_data_set_default_double(settings, "spot_width", 0.1);
 	obs_data_set_default_double(settings, "spot_angle", 75.0);
+	obs_data_set_default_bool(settings, "spot_outline", false);
+	obs_data_set_default_double(settings, "spot_outline_width", 4.0);
+	obs_data_set_default_int(settings, "spot_outline_color",
+				 DEFAULT_OUTLINE_COLOR);
 }
 
 const struct text_effect fx_spotlight = {

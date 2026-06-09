@@ -4,6 +4,7 @@
 #include <string.h>
 
 /* Each effect is declared in its own translation unit. */
+extern const struct text_effect fx_none;
 extern const struct text_effect fx_flame;
 extern const struct text_effect fx_rainbow;
 extern const struct text_effect fx_neon;
@@ -26,6 +27,7 @@ extern const struct text_effect fx_sidebound;
 extern const struct text_effect fx_hop;
 
 static const struct text_effect *const k_effects[] = {
+	&fx_none,
 	&fx_flame,
 	&fx_rainbow,
 	&fx_neon,

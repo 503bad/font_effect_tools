@@ -60,8 +60,8 @@ static void rebuild_mask(struct flametext_source *s)
 	if (s->text && s->text[0] && s->font_path[0]) {
 		s->mask = flametext_mask_build(s->text, s->font_path,
 					       s->font_size, s->bold, s->italic,
-					       bottom_pad, mg.left, mg.right,
-					       mg.top);
+					       s->line_spacing, bottom_pad,
+					       mg.left, mg.right, mg.top);
 	}
 	obs_leave_graphics();
 
@@ -112,6 +112,11 @@ static void flametext_update(void *data, obs_data_t *settings)
 
 	if (font_obj)
 		obs_data_release(font_obj);
+
+	/* --- shared line spacing (auto vs explicit pixel pitch) --- */
+	bool line_manual = obs_data_get_int(settings, "line_mode") == 1;
+	int line_px = (int)obs_data_get_int(settings, "line_px");
+	s->line_spacing = (line_manual && line_px > 0) ? line_px : 0;
 
 	/* --- active effect selection --- */
 	int idx = fx_registry_index(obs_data_get_string(settings, "effect"));
@@ -235,6 +240,19 @@ static uint32_t flametext_get_height(void *data)
 	return (s->mask && s->mask->height) ? s->mask->height : 1u;
 }
 
+/* Show the explicit pixel slider only when the line spacing mode is manual. */
+static bool on_line_mode_changed(void *priv, obs_properties_t *props,
+				 obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(priv);
+	UNUSED_PARAMETER(prop);
+	obs_property_t *px = obs_properties_get(props, "line_px");
+	if (px)
+		obs_property_set_visible(px,
+			obs_data_get_int(settings, "line_mode") == 1);
+	return true;
+}
+
 /* Show only the active effect's property group. */
 static bool on_effect_changed(void *priv, obs_properties_t *props,
 			      obs_property_t *prop, obs_data_t *settings)
@@ -264,6 +282,18 @@ static obs_properties_t *flametext_properties(void *data)
 	obs_properties_add_text(p, "text", obs_module_text("Text"),
 				OBS_TEXT_MULTILINE);
 	obs_properties_add_font(p, "font", obs_module_text("Font"));
+
+	/* Shared line spacing: auto (font's natural height) or explicit pixels. */
+	obs_property_t *lm = obs_properties_add_list(p, "line_mode",
+		obs_module_text("LineSpacing"), OBS_COMBO_TYPE_LIST,
+		OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(lm, obs_module_text("LineSpacingAuto"), 0);
+	obs_property_list_add_int(lm, obs_module_text("LineSpacingManual"), 1);
+	obs_property_set_modified_callback2(lm, on_line_mode_changed, NULL);
+	obs_property_t *lpx = obs_properties_add_int_slider(p, "line_px",
+		obs_module_text("LineSpacingPx"), 1, 2000, 1);
+	obs_property_set_visible(lpx,
+		s ? (s->line_spacing > 0) : false);
 
 	/* Effect selector. */
 	obs_property_t *sel = obs_properties_add_list(p, "effect",
@@ -314,6 +344,9 @@ static void flametext_defaults(obs_data_t *settings)
 	obs_data_release(font);
 
 	obs_data_set_default_string(settings, "effect", DEFAULT_EFFECT_ID);
+
+	obs_data_set_default_int(settings, "line_mode", 0); /* auto */
+	obs_data_set_default_int(settings, "line_px", 150);
 
 	size_t n;
 	const struct text_effect *const *fx = fx_registry(&n);

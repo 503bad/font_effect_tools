@@ -26,6 +26,10 @@ struct flametext_source {
 	bool     italic;
 	char     font_path[1024];
 
+	/* Baseline-to-baseline line pitch in pixels for multi-line text;
+	 * 0 = auto (use the font's natural line height). Shared across effects. */
+	int      line_spacing;
+
 	/* Shared rasterized text coverage mask. */
 	struct flametext_mask *mask;
 

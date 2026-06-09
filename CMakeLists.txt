@@ -35,7 +35,9 @@ target_sources(
     src/flametext-source.c
     src/flametext-text.c
     src/flametext-particles.c
+    src/flametext-outline.c
     src/effect-registry.c
+    src/effect-none.c
     src/effect-flame.c
     src/effect-rainbow.c
     src/effect-neon.c

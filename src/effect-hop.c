@@ -1,5 +1,6 @@
 #include "effect-hop.h"
 #include "flametext-sprites.h" /* fx_textfill_* */
+#include "flametext-outline.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -10,10 +11,12 @@
 #include <plugin-support.h>
 
 #define DEFAULT_HOP_FONT 0xFFFFFFFFu /* white #FFFFFF */
+#define DEFAULT_OUTLINE_COLOR 0xFF000000u /* opaque black */
 #define HOP_PI 3.14159265f
 
 struct hop_state {
 	gs_effect_t *fill;
+	gs_effect_t *outline;
 
 	uint32_t font_color;
 	int      dir;     /* 0 = from left, 1 = from right */
@@ -22,6 +25,10 @@ struct hop_state {
 	float    height;  /* hop height (fraction of text)  */
 	float    squash;  /* squash & stretch amount 0..1   */
 	float    hold;    /* seconds held in place          */
+
+	bool     outline_on;
+	float    outline_width;
+	uint32_t outline_color;
 };
 
 static void unpack_color(uint32_t c, float rgba[4])
@@ -44,6 +51,8 @@ static void hop_destroy(void *data)
 		return;
 	if (s->fill)
 		gs_effect_destroy(s->fill);
+	if (s->outline)
+		gs_effect_destroy(s->outline);
 	bfree(s);
 }
 
@@ -53,6 +62,7 @@ static void hop_load_graphics(void *data)
 	s->fill = fx_textfill_load();
 	if (!s->fill)
 		obs_log(LOG_ERROR, "hop: failed to load textfill.effect");
+	s->outline = fx_outline_load();
 }
 
 static void hop_update(void *data, obs_data_t *settings)
@@ -65,6 +75,11 @@ static void hop_update(void *data, obs_data_t *settings)
 	s->height = (float)obs_data_get_double(settings, "hop_height");
 	s->squash = (float)obs_data_get_double(settings, "hop_squash");
 	s->hold = (float)obs_data_get_double(settings, "hop_hold");
+	s->outline_on = obs_data_get_bool(settings, "hop_outline");
+	s->outline_width =
+		(float)obs_data_get_double(settings, "hop_outline_width");
+	s->outline_color =
+		(uint32_t)obs_data_get_int(settings, "hop_outline_color");
 }
 
 /* Vertical hop offset (<=0, up) and squash/stretch scales for a 0..1 progress
@@ -112,8 +127,10 @@ static void hop_render(void *data, const struct fx_render_ctx *ctx)
 	float exit_to = -enter_from;
 	float text_h = mask->text_bottom - mask->text_top;
 
-	float rgba[4];
+	float rgba[4], orgba[4];
 	unpack_color(s->font_color, rgba);
+	unpack_color(s->outline_color, orgba);
+	bool draw_outline = s->outline_on && s->outline;
 
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_ONE, GS_BLEND_INVSRCALPHA);
@@ -155,6 +172,12 @@ static void hop_render(void *data, const struct fx_render_ctx *ctx)
 		gs_matrix_translate3f(pivx, pivy, 0.0f);
 		gs_matrix_scale3f(sx, sy, 1.0f);
 		gs_matrix_translate3f(-pivx, -pivy, 0.0f);
+		if (draw_outline)
+			fx_outline_render_sub(s->outline, mask->tex, ctx->width,
+					      ctx->height, orgba,
+					      s->outline_width, (uint32_t)g->x,
+					      (uint32_t)g->y, (uint32_t)g->w,
+					      (uint32_t)g->h);
 		fx_textfill_render_sub(s->fill, mask->tex, rgba, (uint32_t)g->x,
 				       (uint32_t)g->y, (uint32_t)g->w,
 				       (uint32_t)g->h);
@@ -183,6 +206,11 @@ static void hop_properties(obs_properties_t *p)
 		obs_module_text("HopSquash"), 0.0, 1.0, 0.01);
 	obs_properties_add_float_slider(p, "hop_hold",
 		obs_module_text("HopHold"), 0.0, 6.0, 0.1);
+	obs_properties_add_bool(p, "hop_outline", obs_module_text("OutlineShow"));
+	obs_properties_add_float_slider(p, "hop_outline_width",
+		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
+	obs_properties_add_color_alpha(p, "hop_outline_color",
+		obs_module_text("OutlineColor"));
 }
 
 static void hop_defaults(obs_data_t *settings)
@@ -194,6 +222,10 @@ static void hop_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "hop_height", 0.6);
 	obs_data_set_default_double(settings, "hop_squash", 0.5);
 	obs_data_set_default_double(settings, "hop_hold", 1.5);
+	obs_data_set_default_bool(settings, "hop_outline", false);
+	obs_data_set_default_double(settings, "hop_outline_width", 4.0);
+	obs_data_set_default_int(settings, "hop_outline_color",
+				 DEFAULT_OUTLINE_COLOR);
 }
 
 const struct text_effect fx_hop = {

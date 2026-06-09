@@ -1,4 +1,5 @@
 #include "effect-rainbow.h"
+#include "flametext-outline.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -9,16 +10,31 @@
 
 #include <plugin-support.h>
 
+#define DEFAULT_OUTLINE_COLOR 0xFF000000u /* opaque black */
+
 /* Per-instance state for the rainbow fill effect. */
 struct rainbow_state {
 	gs_effect_t *effect;
+	gs_effect_t *outline;
 
 	float speed;      /* hue scroll speed                      */
 	float scale;      /* number of color bands across the text */
 	float saturation; /* 0..1                                  */
 	float brightness; /* 0..1                                  */
 	float angle;      /* gradient direction in degrees         */
+
+	bool     outline_on;
+	float    outline_width;
+	uint32_t outline_color;
 };
+
+static void unpack_color(uint32_t c, float rgba[4])
+{
+	rgba[0] = (float)((c >> 0) & 0xFF) / 255.0f;
+	rgba[1] = (float)((c >> 8) & 0xFF) / 255.0f;
+	rgba[2] = (float)((c >> 16) & 0xFF) / 255.0f;
+	rgba[3] = (float)((c >> 24) & 0xFF) / 255.0f;
+}
 
 static void *rainbow_create(void)
 {
@@ -33,6 +49,8 @@ static void rainbow_destroy(void *data)
 	/* Graphics lock held by the host. */
 	if (s->effect)
 		gs_effect_destroy(s->effect);
+	if (s->outline)
+		gs_effect_destroy(s->outline);
 	bfree(s);
 }
 
@@ -48,6 +66,7 @@ static void rainbow_load_graphics(void *data)
 				path);
 	}
 	bfree(path);
+	s->outline = fx_outline_load();
 }
 
 static void rainbow_update(void *data, obs_data_t *settings)
@@ -58,6 +77,9 @@ static void rainbow_update(void *data, obs_data_t *settings)
 	s->saturation = (float)obs_data_get_double(settings, "rb_saturation");
 	s->brightness = (float)obs_data_get_double(settings, "rb_brightness");
 	s->angle = (float)obs_data_get_double(settings, "rb_angle");
+	s->outline_on = obs_data_get_bool(settings, "rb_outline");
+	s->outline_width = (float)obs_data_get_double(settings, "rb_outline_width");
+	s->outline_color = (uint32_t)obs_data_get_int(settings, "rb_outline_color");
 }
 
 static void rainbow_render(void *data, const struct fx_render_ctx *ctx)
@@ -95,6 +117,13 @@ static void rainbow_render(void *data, const struct fx_render_ctx *ctx)
 		gs_effect_set_vec2(p_dir, &d);
 	}
 
+	if (s->outline_on && s->outline) {
+		float oc[4];
+		unpack_color(s->outline_color, oc);
+		fx_outline_render_full(s->outline, mask->tex, ctx->width,
+				       ctx->height, oc, s->outline_width);
+	}
+
 	gs_blend_state_push();
 	gs_blend_function(GS_BLEND_SRCALPHA, GS_BLEND_INVSRCALPHA);
 	while (gs_effect_loop(e, "Draw"))
@@ -114,6 +143,11 @@ static void rainbow_properties(obs_properties_t *p)
 		obs_module_text("RbSaturation"), 0.0, 1.0, 0.01);
 	obs_properties_add_float_slider(p, "rb_brightness",
 		obs_module_text("RbBrightness"), 0.0, 1.0, 0.01);
+	obs_properties_add_bool(p, "rb_outline", obs_module_text("OutlineShow"));
+	obs_properties_add_float_slider(p, "rb_outline_width",
+		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
+	obs_properties_add_color_alpha(p, "rb_outline_color",
+		obs_module_text("OutlineColor"));
 }
 
 static void rainbow_defaults(obs_data_t *settings)
@@ -123,6 +157,10 @@ static void rainbow_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "rb_angle", 90.0);
 	obs_data_set_default_double(settings, "rb_saturation", 0.95);
 	obs_data_set_default_double(settings, "rb_brightness", 1.0);
+	obs_data_set_default_bool(settings, "rb_outline", false);
+	obs_data_set_default_double(settings, "rb_outline_width", 4.0);
+	obs_data_set_default_int(settings, "rb_outline_color",
+				 DEFAULT_OUTLINE_COLOR);
 }
 
 const struct text_effect fx_rainbow = {
