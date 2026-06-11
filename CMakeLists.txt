@@ -59,6 +59,13 @@ target_sources(
     src/effect-cube.c
     src/effect-sidebound.c
     src/effect-hop.c
+    src/flametext-glow.c
+    src/effect-counter.c
+    src/effect-slice.c
+    src/effect-slidein.c
+    src/effect-jitter.c
+    src/effect-slime.c
+    src/effect-wave.c
 )
 
 if(WIN32)

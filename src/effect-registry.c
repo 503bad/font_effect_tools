@@ -25,6 +25,12 @@ extern const struct text_effect fx_depth3d;
 extern const struct text_effect fx_cube;
 extern const struct text_effect fx_sidebound;
 extern const struct text_effect fx_hop;
+extern const struct text_effect fx_counter;
+extern const struct text_effect fx_slice;
+extern const struct text_effect fx_slidein;
+extern const struct text_effect fx_jitter;
+extern const struct text_effect fx_slime;
+extern const struct text_effect fx_wave;
 
 static const struct text_effect *const k_effects[] = {
 	&fx_none,
@@ -48,6 +54,12 @@ static const struct text_effect *const k_effects[] = {
 	&fx_cube,
 	&fx_sidebound,
 	&fx_hop,
+	&fx_counter,
+	&fx_slice,
+	&fx_slidein,
+	&fx_jitter,
+	&fx_slime,
+	&fx_wave,
 };
 
 const struct text_effect *const *fx_registry(size_t *count)

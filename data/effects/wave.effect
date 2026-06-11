@@ -1,0 +1,138 @@
+/* Wave — warps the text with concentric ripples radiating from the text
+ * centre, like the surface of water after a drop. Every layer (drop shadow,
+ * outline ring, fill, glow halo) is composed in this one pass because each has
+ * to follow the same displaced coverage. cov_at() displaces the sample point
+ * radially by a travelling sine (plus an irregular second wave blended in by
+ * `wrandom`). Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;       /* GS_R8 coverage mask; .r = coverage */
+uniform float2 canvas;         /* mask size in pixels                */
+uniform float4 font_color;
+
+uniform float2 center;         /* ripple origin in canvas px         */
+uniform float  hpx;            /* text height in px (scale basis)    */
+uniform float  time;
+uniform float  freq;           /* ripples across one text height     */
+uniform float  strength;       /* displacement amount 0..1           */
+uniform float  speed;          /* ripple travel speed                */
+uniform float  wrandom;        /* irregularity 0..1                  */
+
+uniform float  outline_on;
+uniform float  outline_width;
+uniform float4 outline_color;
+
+uniform float  glow;           /* halo strength (0 disables)         */
+
+uniform float  shadow_on;
+uniform float4 shadow_color;
+uniform float2 shadow_off;     /* drop shadow offset in px           */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float cov_at(float2 px)
+{
+	float2 d = px - center;
+	float dist = length(d);
+	float ph = dist / max(hpx, 1.0) * freq;
+	float t = time * speed;
+
+	float w = sin(6.2831853 * (ph - t));
+	float j = sin(6.2831853 * (ph * 1.7 - t * 1.3) + d.x * 0.013 +
+		      d.y * 0.011);
+	w = lerp(w, 0.55 * w + 0.8 * j, wrandom);
+
+	float amp = strength * hpx * 0.05;
+	float2 dir = dist > 0.001 ? d / dist : float2(0.0, 0.0);
+	float2 src = px - dir * (w * amp);
+	return image.Sample(maskSampler, src / canvas).r;
+}
+
+float4 PSWave(VertData v) : TARGET
+{
+	float2 px = v.uv * canvas;
+	float cov = cov_at(px);
+
+	float4 acc = float4(0.0, 0.0, 0.0, 0.0);
+
+	/* Drop shadow underneath everything. */
+	if (shadow_on > 0.5) {
+		float cs = cov_at(px - shadow_off);
+		float a = cs * shadow_color.a;
+		acc = float4(shadow_color.rgb * a, a);
+	}
+
+	/* Outline ring: dilate the rippled coverage (golden-angle disc). */
+	if (outline_on > 0.5) {
+		float radius = max(outline_width, 0.5);
+		const int   N  = 24;
+		const float GA = 2.39996323;
+		float dil = cov;
+		for (int i = 0; i < N; i++) {
+			float fi = (float)i + 0.5;
+			float rr = sqrt(fi / (float)N);
+			float a  = fi * GA;
+			float2 off = float2(cos(a), sin(a)) * (rr * radius);
+			dil = max(dil, cov_at(px + off));
+		}
+		float a = dil * outline_color.a;
+		acc.rgb = outline_color.rgb * a + acc.rgb * (1.0 - a);
+		acc.a   = a + acc.a * (1.0 - a);
+	}
+
+	/* The text itself. */
+	float af = cov * font_color.a;
+	acc.rgb = font_color.rgb * af + acc.rgb * (1.0 - af);
+	acc.a   = af + acc.a * (1.0 - af);
+
+	/* Glow halo, additive on top. */
+	if (glow > 0.001) {
+		float r = min(6.0 + 9.0 * glow, 34.0);
+		const int   N2  = 16;
+		const float GA2 = 2.39996323;
+		float field = 0.0;
+		float wsum  = 0.0;
+		for (int j2 = 0; j2 < N2; j2++) {
+			float fj = (float)j2 + 0.5;
+			float rr = sqrt(fj / (float)N2);
+			float a  = fj * GA2;
+			float2 off = float2(cos(a), sin(a)) * (rr * r);
+			float  w = exp(-rr * rr * 2.0);
+			field += cov_at(px + off) * w;
+			wsum  += w;
+		}
+		field /= wsum;
+		float halo = field * field;
+		float g = saturate(halo * glow) * font_color.a;
+		acc.rgb += font_color.rgb * g;
+		acc.a = saturate(acc.a + g * 0.6);
+	}
+
+	return acc;
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSWave(v);
+	}
+}

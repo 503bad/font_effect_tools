@@ -1,0 +1,65 @@
+/* Text glow — a soft halo around the glyphs, built from a golden-angle
+ * ("sunflower") weighted blur of the coverage mask. Drawn *before* an effect's
+ * own fill so the bright haze sits behind the letters. Premultiplied output;
+ * the alpha is kept below the emitted light so the halo brightens what is
+ * underneath (additive-ish) instead of fully occluding it. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;      /* GS_R8 coverage mask; .r = coverage */
+uniform float2 canvas;        /* mask size in pixels (uv <-> px)    */
+uniform float4 glow_color;    /* halo colour (alpha scales it)      */
+uniform float  radius;        /* halo radius in pixels              */
+uniform float  intensity;     /* halo strength (0 disables)         */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSGlow(VertData v) : TARGET
+{
+	float r = max(radius, 1.0);
+
+	const int   N  = 20;
+	const float GA = 2.39996323; /* golden angle (radians) */
+	float field = 0.0;
+	float wsum  = 0.0;
+	for (int i = 0; i < N; i++) {
+		float fi = (float)i + 0.5;
+		float rr = sqrt(fi / (float)N); /* 0..1, area-uniform */
+		float a  = fi * GA;
+		float2 off = float2(cos(a), sin(a)) * (rr * r);
+		float  w = exp(-rr * rr * 2.0);
+		field += image.Sample(maskSampler, v.uv + off / canvas).r * w;
+		wsum  += w;
+	}
+	field /= wsum;
+
+	/* Square the field so the haze hugs the glyphs with a soft foot. */
+	float halo = field * field;
+	float a = saturate(halo * intensity) * glow_color.a;
+	return float4(glow_color.rgb * a, a * 0.6);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSGlow(v);
+	}
+}

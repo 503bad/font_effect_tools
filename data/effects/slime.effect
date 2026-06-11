@@ -1,0 +1,67 @@
+/* Slime jiggle — warps the coverage mask like a blob of jelly anchored at the
+ * text's bottom edge. The host integrates two damped springs (vertical squash
+ * and horizontal sway, kicked by random impulses) and hands their current
+ * values in as uniforms; this shader only does the geometric warp: the bottom
+ * row of the text stays put and the influence grows toward the top (with the
+ * `softness` exponent deciding how much of the body joins the wobble).
+ * Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;     /* GS_R8 coverage mask; .r = coverage */
+uniform float2 canvas;       /* mask size in pixels                */
+uniform float4 font_color;
+
+uniform float  top;          /* text band top in canvas px         */
+uniform float  bottom;       /* text band bottom (anchor line)     */
+uniform float  sway;         /* horizontal offset at the top, px   */
+uniform float  squash;       /* vertical scale delta at the top    */
+uniform float  softness;     /* 0 stiff tip .. 1 whole-body wobble */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSSlime(VertData v) : TARGET
+{
+	float2 px = v.uv * canvas;
+	float hgt = max(bottom - top, 1.0);
+
+	/* 0 at the anchored bottom, 1 at the text top (and above). */
+	float h = clamp((bottom - px.y) / hgt, 0.0, 1.0);
+	float e = lerp(2.5, 1.2, saturate(softness));
+	float w = pow(h, e);
+
+	/* Inverse warp: stretch/squash about the bottom line, sway the top. */
+	float vscale = max(1.0 + squash * w, 0.4);
+	float2 src;
+	src.x = px.x - sway * w;
+	src.y = bottom - (bottom - px.y) / vscale;
+
+	float cov = image.Sample(maskSampler, src / canvas).r;
+	float a = cov * font_color.a;
+	return float4(font_color.rgb * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSSlime(v);
+	}
+}
