@@ -52,6 +52,14 @@ static void rebuild_mask(struct flametext_source *s)
 	if (mg.bottom > bottom_pad)
 		bottom_pad = mg.bottom;
 
+	/* The outer glow reaches past whatever the effect draws, on every
+	 * side, so its margin stacks on top of the effect's own. */
+	uint32_t gm = fx_oglow_margin(&s->oglow);
+	mg.left += gm;
+	mg.right += gm;
+	mg.top += gm;
+	bottom_pad += gm;
+
 	obs_enter_graphics();
 	if (s->mask) {
 		flametext_mask_free(s->mask);
@@ -141,6 +149,9 @@ static void flametext_update(void *data, obs_data_t *settings)
 			fx[i]->update(s->states[i], settings);
 	}
 
+	/* --- shared outer glow (before rebuild_mask: it affects margins) */
+	fx_oglow_update(&s->oglow, settings);
+
 	rebuild_mask(s);
 }
 
@@ -162,6 +173,7 @@ static void *flametext_create(obs_data_t *settings, obs_source_t *source)
 		if (fx[i]->load_graphics)
 			fx[i]->load_graphics(s->states[i]);
 	}
+	fx_oglow_load(&s->oglow);
 	obs_leave_graphics();
 
 	flametext_update(s, settings);
@@ -181,6 +193,7 @@ static void flametext_destroy(void *data)
 	}
 	if (s->mask)
 		flametext_mask_free(s->mask);
+	fx_oglow_free(&s->oglow);
 	obs_leave_graphics();
 
 	bfree(s->states);
@@ -232,9 +245,18 @@ static void flametext_video_render(void *data, gs_effect_t *unused)
 		return;
 
 	const struct text_effect *fx = fx_registry(NULL)[s->active];
-	if (fx->render) {
-		struct fx_render_ctx ctx;
-		fill_ctx(s, &ctx);
+	if (!fx->render)
+		return;
+
+	struct fx_render_ctx ctx;
+	fill_ctx(s, &ctx);
+
+	/* Outer glow: capture the effect offscreen, lay the halo on the scene
+	 * first (behind everything it drew), then composite the frame on top. */
+	if (fx_oglow_begin(&s->oglow, ctx.width, ctx.height)) {
+		fx->render(s->states[s->active], &ctx);
+		fx_oglow_end(&s->oglow, ctx.width, ctx.height);
+	} else {
 		fx->render(s->states[s->active], &ctx);
 	}
 }
@@ -396,6 +418,9 @@ static obs_properties_t *flametext_properties(void *data)
 			obs_module_text(fx[i]->name_key), OBS_GROUP_NORMAL, grp);
 	}
 
+	/* Shared outer glow, below the effect groups (applies to all of them). */
+	fx_oglow_get_properties(p);
+
 	/* Initial visibility based on the currently active effect. */
 	int active = s ? s->active : 0;
 	for (size_t i = 0; i < n; ++i) {
@@ -440,6 +465,8 @@ static void flametext_defaults(obs_data_t *settings)
 		if (fx[i]->get_defaults)
 			fx[i]->get_defaults(settings);
 	}
+
+	fx_oglow_get_defaults(settings);
 }
 
 static struct obs_source_info s_flametext_source_info = {

@@ -3,6 +3,8 @@
 #include <obs-module.h>
 #include <stddef.h>
 
+#include "flametext-outerglow.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,6 +50,9 @@ struct flametext_source {
 
 	/* Shared rasterized text coverage mask. */
 	struct flametext_mask *mask;
+
+	/* Host-level outer glow layered behind the active effect's output. */
+	struct fx_outerglow oglow;
 
 	/* One state blob per registered effect, parallel to fx_registry(). */
 	void **states;

@@ -60,6 +60,7 @@ target_sources(
     src/effect-sidebound.c
     src/effect-hop.c
     src/flametext-glow.c
+    src/flametext-outerglow.c
     src/effect-counter.c
     src/effect-slice.c
     src/effect-slidein.c
