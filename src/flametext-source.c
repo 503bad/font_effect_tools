@@ -62,7 +62,8 @@ static void rebuild_mask(struct flametext_source *s)
 					       s->font_size, s->bold, s->italic,
 					       s->line_spacing, s->letter_spacing,
 					       s->align, bottom_pad,
-					       mg.left, mg.right, mg.top);
+					       mg.left, mg.right, mg.top,
+					       s->writing_dir == 1);
 	}
 	obs_leave_graphics();
 
@@ -124,7 +125,8 @@ static void flametext_update(void *data, obs_data_t *settings)
 	s->letter_spacing = s->letter_manual
 		? (int)obs_data_get_int(settings, "letter_px") : 0;
 
-	/* --- shared horizontal alignment --- */
+	/* --- shared writing direction and alignment --- */
+	s->writing_dir = (int)obs_data_get_int(settings, "writing_dir");
 	s->align = (int)obs_data_get_int(settings, "align");
 
 	/* --- active effect selection --- */
@@ -275,6 +277,35 @@ static bool on_letter_mode_changed(void *priv, obs_properties_t *props,
 	return true;
 }
 
+/* Alignment labels follow the writing direction: lines align left/center/
+ * right when horizontal, columns align top/center/bottom when vertical. The
+ * stored values (0/1/2) are shared between both modes. */
+static void populate_align_list(obs_property_t *al, bool vertical)
+{
+	obs_property_list_clear(al);
+	obs_property_list_add_int(al,
+		obs_module_text(vertical ? "AlignTop" : "AlignLeft"),
+		FLAMETEXT_ALIGN_LEFT);
+	obs_property_list_add_int(al, obs_module_text("AlignCenter"),
+				  FLAMETEXT_ALIGN_CENTER);
+	obs_property_list_add_int(al,
+		obs_module_text(vertical ? "AlignBottom" : "AlignRight"),
+		FLAMETEXT_ALIGN_RIGHT);
+}
+
+/* Swap the alignment labels when the writing direction changes. */
+static bool on_writing_dir_changed(void *priv, obs_properties_t *props,
+				   obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(priv);
+	UNUSED_PARAMETER(prop);
+	obs_property_t *al = obs_properties_get(props, "align");
+	if (al)
+		populate_align_list(al,
+			obs_data_get_int(settings, "writing_dir") == 1);
+	return true;
+}
+
 /* Show only the active effect's property group. */
 static bool on_effect_changed(void *priv, obs_properties_t *props,
 			      obs_property_t *prop, obs_data_t *settings)
@@ -299,6 +330,18 @@ static obs_properties_t *flametext_properties(void *data)
 {
 	struct flametext_source *s = data;
 	obs_properties_t *p = obs_properties_create();
+
+	/* Effect selector first so the chosen look leads the panel. */
+	obs_property_t *sel = obs_properties_add_list(p, "effect",
+		obs_module_text("Effect"), OBS_COMBO_TYPE_LIST,
+		OBS_COMBO_FORMAT_STRING);
+
+	size_t n;
+	const struct text_effect *const *fx = fx_registry(&n);
+	for (size_t i = 0; i < n; ++i)
+		obs_property_list_add_string(sel,
+			obs_module_text(fx[i]->name_key), fx[i]->id);
+	obs_property_set_modified_callback2(sel, on_effect_changed, NULL);
 
 	/* Shared text / font (used across every effect). */
 	obs_properties_add_text(p, "text", obs_module_text("Text"),
@@ -328,28 +371,19 @@ static obs_properties_t *flametext_properties(void *data)
 		obs_module_text("LetterSpacingPx"), -500, 1000, 1);
 	obs_property_set_visible(kpx, s ? s->letter_manual : false);
 
-	/* Shared horizontal alignment (exclusive radio: left/center/right). */
+	/* Shared writing direction (exclusive radio: horizontal/vertical). */
+	obs_property_t *wd = obs_properties_add_list(p, "writing_dir",
+		obs_module_text("WritingDir"), OBS_COMBO_TYPE_RADIO,
+		OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(wd, obs_module_text("WritingHorizontal"), 0);
+	obs_property_list_add_int(wd, obs_module_text("WritingVertical"), 1);
+	obs_property_set_modified_callback2(wd, on_writing_dir_changed, NULL);
+
+	/* Shared alignment (exclusive radio; labels per writing direction). */
 	obs_property_t *al = obs_properties_add_list(p, "align",
 		obs_module_text("TextAlign"), OBS_COMBO_TYPE_RADIO,
 		OBS_COMBO_FORMAT_INT);
-	obs_property_list_add_int(al, obs_module_text("AlignLeft"),
-				  FLAMETEXT_ALIGN_LEFT);
-	obs_property_list_add_int(al, obs_module_text("AlignCenter"),
-				  FLAMETEXT_ALIGN_CENTER);
-	obs_property_list_add_int(al, obs_module_text("AlignRight"),
-				  FLAMETEXT_ALIGN_RIGHT);
-
-	/* Effect selector. */
-	obs_property_t *sel = obs_properties_add_list(p, "effect",
-		obs_module_text("Effect"), OBS_COMBO_TYPE_LIST,
-		OBS_COMBO_FORMAT_STRING);
-
-	size_t n;
-	const struct text_effect *const *fx = fx_registry(&n);
-	for (size_t i = 0; i < n; ++i)
-		obs_property_list_add_string(sel,
-			obs_module_text(fx[i]->name_key), fx[i]->id);
-	obs_property_set_modified_callback2(sel, on_effect_changed, NULL);
+	populate_align_list(al, s ? s->writing_dir == 1 : false);
 
 	/* One group per effect; only the active one is shown. */
 	for (size_t i = 0; i < n; ++i) {
@@ -377,7 +411,7 @@ static obs_properties_t *flametext_properties(void *data)
 
 static void flametext_defaults(obs_data_t *settings)
 {
-	obs_data_set_default_string(settings, "text", "test");
+	obs_data_set_default_string(settings, "text", "Font Effect Tools");
 
 	obs_data_t *font = obs_data_create();
 	obs_data_set_default_string(font, "face", "Impact");
@@ -393,6 +427,7 @@ static void flametext_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "line_px", 150);
 	obs_data_set_default_int(settings, "letter_mode", 0); /* auto */
 	obs_data_set_default_int(settings, "letter_px", 0);
+	obs_data_set_default_int(settings, "writing_dir", 0); /* horizontal */
 	obs_data_set_default_int(settings, "align", FLAMETEXT_ALIGN_CENTER);
 
 	size_t n;

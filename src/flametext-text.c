@@ -84,6 +84,230 @@ static void blit_max(unsigned char *canvas, int cw, int ch,
 	}
 }
 
+/* A glyph rasterized for the vertical (tategaki) layout, captured with its
+ * column/row cell so it can be placed once the column heights are known. */
+struct vtmp_glyph {
+	unsigned char *gray; /* w*h, owned */
+	int w, h;
+	int left;            /* bitmap_left (px right of pen)   */
+	int top;             /* bitmap_top  (px above baseline) */
+	int col;             /* column index (0 = first = rightmost) */
+	int row;             /* cell index from the column top  */
+};
+
+/* Vertical (tategaki) layout. Characters advance downward by one em
+ * (+ letter_spacing) inside each column; '\n' starts a new column and the
+ * columns stack right-to-left with `col_pitch` between column centres. Each
+ * glyph keeps its horizontal-baseline metrics: a per-cell baseline sits at
+ * the face ascender below the cell top, and the bitmap is centred
+ * horizontally on the column axis. `align` picks top/center/bottom of each
+ * column against the tallest one. glyphs[] is filled in reading order
+ * (top-to-bottom, then right-to-left). Mirrors the horizontal build path;
+ * the caller still owns `face`. */
+static struct flametext_mask *build_vertical(FT_Face face,
+					     const char *utf8_text,
+					     uint32_t pixel_size,
+					     bool bold,
+					     int col_pitch,
+					     int letter_spacing,
+					     int align,
+					     uint32_t bottom_pad,
+					     uint32_t extra_left,
+					     uint32_t extra_right,
+					     uint32_t extra_top)
+{
+	int step = (int)pixel_size + letter_spacing;
+	if (step < 1)
+		step = 1;
+	int asc = (int)(face->size->metrics.ascender >> 6);
+	if (asc <= 0)
+		asc = (int)(pixel_size * 4 / 5);
+
+	/* Count codepoints (upper bound on glyphs) and columns ('\n'). */
+	size_t cap = 0;
+	int col_total = 1;
+	for (const char *q = utf8_text; *q;) {
+		uint32_t cp = utf8_next(&q);
+		if (cp == 0)
+			break;
+		if (cp == '\n')
+			++col_total;
+		else if (cp != '\r')
+			++cap;
+	}
+	struct vtmp_glyph *tmp = bzalloc(sizeof(*tmp) * (cap + 1));
+	size_t tmp_count = 0;
+	int *col_cells = bzalloc(sizeof(int) * (size_t)col_total);
+
+	int cur_col = 0;
+	const char *p = utf8_text;
+	while (*p) {
+		uint32_t cp = utf8_next(&p);
+		if (cp == 0)
+			break;
+		if (cp == '\r')
+			continue;
+		if (cp == '\n') {
+			++cur_col;
+			continue;
+		}
+		/* Every character (including spaces and failed glyphs)
+		 * consumes one cell so gaps survive in the column. */
+		int row = col_cells[cur_col]++;
+		FT_UInt gi = FT_Get_Char_Index(face, cp);
+		if (FT_Load_Glyph(face, gi, FT_LOAD_DEFAULT) != 0)
+			continue;
+		if (bold)
+			FT_Outline_Embolden(&face->glyph->outline,
+					    (FT_Pos)(pixel_size / 24 + 1) << 6);
+		if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0)
+			continue;
+		FT_Bitmap *bm = &face->glyph->bitmap;
+		int w = (int)bm->width;
+		int h = (int)bm->rows;
+		if (w <= 0 || h <= 0)
+			continue;
+		struct vtmp_glyph *g = &tmp[tmp_count];
+		g->w = w;
+		g->h = h;
+		g->left = face->glyph->bitmap_left;
+		g->top = face->glyph->bitmap_top;
+		g->col = cur_col;
+		g->row = row;
+		g->gray = bmalloc((size_t)w * h);
+		for (int y = 0; y < h; ++y)
+			memcpy(g->gray + (size_t)y * w,
+			       bm->buffer + (size_t)y * bm->pitch, w);
+		++tmp_count;
+	}
+
+	if (tmp_count == 0) {
+		bfree(tmp);
+		bfree(col_cells);
+		return NULL;
+	}
+
+	/* The tallest column drives the block height; trailing letter
+	 * spacing does not count (same rule as the horizontal line width). */
+	int max_col_h = 0;
+	int *col_h = bmalloc(sizeof(int) * (size_t)col_total);
+	for (int c = 0; c < col_total; ++c) {
+		int h = col_cells[c] > 0 ? col_cells[c] * step - letter_spacing
+					 : 0;
+		if (h < 0)
+			h = 0;
+		col_h[c] = h;
+		if (h > max_col_h)
+			max_col_h = h;
+	}
+	if (max_col_h < 1)
+		max_col_h = 1;
+
+	const int pad_x = (int)(pixel_size * 0.8f);
+	const int pad_left = pad_x + (int)extra_left;
+	const int pad_right = pad_x + (int)extra_right;
+	const int pad_top = (int)(pixel_size * 2.4f) + (int)extra_top;
+	const int pad_bottom = bottom_pad > 0 ? (int)bottom_pad
+					      : (int)(pixel_size * 0.6f);
+
+	int text_w = (col_total - 1) * col_pitch + (int)pixel_size;
+	int text_h = max_col_h;
+
+	int cw = text_w + pad_left + pad_right;
+	int ch = text_h + pad_top + pad_bottom;
+
+	struct flametext_glyph *glyphs =
+		bmalloc(sizeof(*glyphs) * tmp_count);
+	size_t glyph_count = 0;
+
+	unsigned char *canvas = bzalloc((size_t)cw * ch);
+	for (size_t i = 0; i < tmp_count; ++i) {
+		const struct vtmp_glyph *g = &tmp[i];
+		float slack = (float)(max_col_h - col_h[g->col]);
+		float top_off = 0.0f;
+		if (align == FLAMETEXT_ALIGN_RIGHT) /* bottom */
+			top_off = slack;
+		else if (align != FLAMETEXT_ALIGN_LEFT) /* center */
+			top_off = slack * 0.5f;
+		/* Column 0 (first in reading order) is the rightmost. */
+		int col_cx = pad_left + text_w - (int)pixel_size / 2 -
+			     g->col * col_pitch;
+		int gx0 = col_cx - g->w / 2;
+		int gy0 = pad_top + (int)top_off + g->row * step + asc -
+			  g->top;
+		for (int y = 0; y < g->h; ++y) {
+			int cy = gy0 + y;
+			if (cy < 0 || cy >= ch)
+				continue;
+			const unsigned char *srow = g->gray + (size_t)y * g->w;
+			unsigned char *drow = canvas + (size_t)cy * cw;
+			for (int x = 0; x < g->w; ++x) {
+				int cx = gx0 + x;
+				if (cx < 0 || cx >= cw)
+					continue;
+				if (srow[x] > drow[cx])
+					drow[cx] = srow[x];
+			}
+		}
+		/* Clamp the exported rect to the canvas: a glyph wider than one
+		 * em sticks out of its column and per-character effects cast
+		 * these to unsigned texel offsets. */
+		int rx0 = gx0 < 0 ? 0 : gx0;
+		int ry0 = gy0 < 0 ? 0 : gy0;
+		int rx1 = gx0 + g->w > cw ? cw : gx0 + g->w;
+		int ry1 = gy0 + g->h > ch ? ch : gy0 + g->h;
+		if (rx1 > rx0 && ry1 > ry0) {
+			struct flametext_glyph *gl = &glyphs[glyph_count++];
+			gl->x = (float)rx0;
+			gl->y = (float)ry0;
+			gl->w = (float)(rx1 - rx0);
+			gl->h = (float)(ry1 - ry0);
+		}
+		bfree(g->gray);
+	}
+	bfree(tmp);
+	bfree(col_cells);
+	bfree(col_h);
+
+	/* Bottom contour: lowest inked pixel per column (-1 = empty), same
+	 * threshold as the horizontal path. */
+	int *bottom_y = bmalloc(sizeof(int) * (size_t)cw);
+	for (int x = 0; x < cw; ++x) {
+		int lowest = -1;
+		for (int y = ch - 1; y >= 0; --y) {
+			if (canvas[(size_t)y * cw + x] >= 40) {
+				lowest = y;
+				break;
+			}
+		}
+		bottom_y[x] = lowest;
+	}
+
+	const uint8_t *data_ptrs[1] = {(const uint8_t *)canvas};
+	gs_texture_t *tex = gs_texture_create((uint32_t)cw, (uint32_t)ch,
+					      GS_R8, 1, data_ptrs, 0);
+	bfree(canvas);
+	if (!tex) {
+		obs_log(LOG_ERROR, "gs_texture_create failed for text mask");
+		bfree(bottom_y);
+		bfree(glyphs);
+		return NULL;
+	}
+
+	struct flametext_mask *m = bzalloc(sizeof(*m));
+	m->tex = tex;
+	m->width = (uint32_t)cw;
+	m->height = (uint32_t)ch;
+	m->text_left = (float)pad_left;
+	m->text_right = (float)(pad_left + text_w);
+	m->text_top = (float)pad_top;
+	m->text_bottom = (float)(pad_top + text_h);
+	m->bottom_y = bottom_y;
+	m->glyphs = glyphs;
+	m->glyph_count = glyph_count;
+	return m;
+}
+
 struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    const char *font_path,
 					    uint32_t pixel_size,
@@ -95,7 +319,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,
-					    uint32_t extra_top)
+					    uint32_t extra_top,
+					    bool vertical)
 {
 	if (!utf8_text || !utf8_text[0] || !font_path || !font_path[0] ||
 	    pixel_size == 0)
@@ -130,6 +355,21 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 				     : (int)(face->size->metrics.height >> 6);
 	if (pitch < 1)
 		pitch = (int)pixel_size;
+
+	/* Vertical writing takes its own, self-contained layout path; the
+	 * pitch above becomes the column-to-column distance. */
+	if (vertical) {
+		struct flametext_mask *m = build_vertical(face, utf8_text,
+							  pixel_size, bold,
+							  pitch, letter_spacing,
+							  align, bottom_pad,
+							  extra_left,
+							  extra_right,
+							  extra_top);
+		FT_Done_Face(face);
+		FT_Done_FreeType(lib);
+		return m;
+	}
 
 	/* Count codepoints (upper bound on glyphs) and lines (split on '\n'). */
 	size_t cap = 0;

@@ -77,6 +77,14 @@ struct flametext_mask {
  * to every glyph advance; negative tightens, 0 keeps the font's natural
  * advances (auto).
  *
+ * When `vertical` is true the text is laid out as tategaki: characters run
+ * top-to-bottom inside each column, '\n' starts a new column, and columns
+ * stack right-to-left (the first column is the rightmost). `line_spacing`
+ * then sets the column-to-column pitch and `letter_spacing` is added to the
+ * per-character downward advance (one em by default). `align` is interpreted
+ * as top/center/bottom of each column (same 0/1/2 values). glyphs[] stays in
+ * reading order.
+ *
  * `bottom_pad` is the empty room (in pixels) reserved below the text; pass 0
  * to use a small default. Effects that need drops/embers to travel downward
  * ask for a larger value. `extra_left`/`extra_right`/`extra_top` add room on
@@ -96,7 +104,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,
-					    uint32_t extra_top);
+					    uint32_t extra_top,
+					    bool vertical);
 
 /* Free a mask. Must be called while holding the OBS graphics lock. */
 void flametext_mask_free(struct flametext_mask *mask);

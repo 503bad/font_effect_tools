@@ -31,6 +31,7 @@ extern const struct text_effect fx_slidein;
 extern const struct text_effect fx_jitter;
 extern const struct text_effect fx_slime;
 extern const struct text_effect fx_wave;
+extern const struct text_effect fx_flip;
 
 static const struct text_effect *const k_effects[] = {
 	&fx_none,
@@ -60,6 +61,7 @@ static const struct text_effect *const k_effects[] = {
 	&fx_jitter,
 	&fx_slime,
 	&fx_wave,
+	&fx_flip,
 };
 
 const struct text_effect *const *fx_registry(size_t *count)

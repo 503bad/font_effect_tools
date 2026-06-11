@@ -25,6 +25,8 @@ struct hop_state {
 	float    height;  /* hop height (fraction of text)  */
 	float    squash;  /* squash & stretch amount 0..1   */
 	float    hold;    /* seconds held in place          */
+	bool     fade_in; /* fade letters in while entering */
+	bool     fade_out;/* fade letters out while exiting */
 
 	bool     outline_on;
 	float    outline_width;
@@ -75,6 +77,8 @@ static void hop_update(void *data, obs_data_t *settings)
 	s->height = (float)obs_data_get_double(settings, "hop_height");
 	s->squash = (float)obs_data_get_double(settings, "hop_squash");
 	s->hold = (float)obs_data_get_double(settings, "hop_hold");
+	s->fade_in = obs_data_get_bool(settings, "hop_fade_in");
+	s->fade_out = obs_data_get_bool(settings, "hop_fade_out");
 	s->outline_on = obs_data_get_bool(settings, "hop_outline");
 	s->outline_width =
 		(float)obs_data_get_double(settings, "hop_outline_width");
@@ -142,15 +146,19 @@ static void hop_render(void *data, const struct fx_render_ctx *ctx)
 		float xs = hold_end + (float)i * stag;
 		float xe = xs + exit_dur;
 
-		float dx, dy = 0.0f, sx = 1.0f, sy = 1.0f;
+		float dx, dy = 0.0f, sx = 1.0f, sy = 1.0f, a = 1.0f;
 		if (lt < es) {
 			dx = enter_from;
+			if (s->fade_in)
+				a = 0.0f;
 		} else if (lt < ee) {
 			float p = (lt - es) / enter_dur;
 			float e = 1.0f - (1.0f - p) * (1.0f - p); /* ease out */
 			dx = enter_from * (1.0f - e);
 			hop_pose(p, s->hops, s->height, s->squash, text_h, &dy,
 				 &sx, &sy);
+			if (s->fade_in)
+				a = p;
 		} else if (lt < xs) {
 			dx = 0.0f;
 		} else if (lt < xe) {
@@ -159,9 +167,17 @@ static void hop_render(void *data, const struct fx_render_ctx *ctx)
 			dx = exit_to * e;
 			hop_pose(p, s->hops, s->height, s->squash, text_h, &dy,
 				 &sx, &sy);
+			if (s->fade_out)
+				a = 1.0f - p;
 		} else {
 			dx = exit_to;
+			if (s->fade_out)
+				a = 0.0f;
 		}
+		if (a <= 0.0f)
+			continue;
+		float fc[4] = {rgba[0], rgba[1], rgba[2], rgba[3] * a};
+		float oc[4] = {orgba[0], orgba[1], orgba[2], orgba[3] * a};
 
 		/* Squash about the glyph's feet (bottom-centre). */
 		float pivx = g->w * 0.5f;
@@ -174,11 +190,11 @@ static void hop_render(void *data, const struct fx_render_ctx *ctx)
 		gs_matrix_translate3f(-pivx, -pivy, 0.0f);
 		if (draw_outline)
 			fx_outline_render_sub(s->outline, mask->tex, ctx->width,
-					      ctx->height, orgba,
+					      ctx->height, oc,
 					      s->outline_width, (uint32_t)g->x,
 					      (uint32_t)g->y, (uint32_t)g->w,
 					      (uint32_t)g->h);
-		fx_textfill_render_sub(s->fill, mask->tex, rgba, (uint32_t)g->x,
+		fx_textfill_render_sub(s->fill, mask->tex, fc, (uint32_t)g->x,
 				       (uint32_t)g->y, (uint32_t)g->w,
 				       (uint32_t)g->h);
 		gs_matrix_pop();
@@ -206,6 +222,9 @@ static void hop_properties(obs_properties_t *p)
 		obs_module_text("HopSquash"), 0.0, 1.0, 0.01);
 	obs_properties_add_float_slider(p, "hop_hold",
 		obs_module_text("HopHold"), 0.0, 6.0, 0.1);
+	obs_properties_add_bool(p, "hop_fade_in", obs_module_text("HopFadeIn"));
+	obs_properties_add_bool(p, "hop_fade_out",
+		obs_module_text("HopFadeOut"));
 	obs_properties_add_bool(p, "hop_outline", obs_module_text("OutlineShow"));
 	obs_properties_add_float_slider(p, "hop_outline_width",
 		obs_module_text("OutlineWidth"), 1.0, 20.0, 0.5);
@@ -222,6 +241,8 @@ static void hop_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "hop_height", 0.6);
 	obs_data_set_default_double(settings, "hop_squash", 0.5);
 	obs_data_set_default_double(settings, "hop_hold", 1.5);
+	obs_data_set_default_bool(settings, "hop_fade_in", true);
+	obs_data_set_default_bool(settings, "hop_fade_out", true);
 	obs_data_set_default_bool(settings, "hop_outline", false);
 	obs_data_set_default_double(settings, "hop_outline_width", 4.0);
 	obs_data_set_default_int(settings, "hop_outline_color",

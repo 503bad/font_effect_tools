@@ -66,6 +66,7 @@ target_sources(
     src/effect-jitter.c
     src/effect-slime.c
     src/effect-wave.c
+    src/effect-flip.c
 )
 
 if(WIN32)

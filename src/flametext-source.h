@@ -38,8 +38,13 @@ struct flametext_source {
 	bool     letter_manual;
 
 	/* Horizontal alignment of each line within the text block
-	 * (enum flametext_align). Shared across effects. */
+	 * (enum flametext_align). In vertical mode the same values align
+	 * each column top/center/bottom. Shared across effects. */
 	int      align;
+
+	/* Writing direction: 0 = horizontal, 1 = vertical (tategaki).
+	 * Shared across effects. */
+	int      writing_dir;
 
 	/* Shared rasterized text coverage mask. */
 	struct flametext_mask *mask;
