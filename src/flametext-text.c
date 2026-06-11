@@ -90,6 +90,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    bool bold,
 					    bool italic,
 					    int line_spacing,
+					    int letter_spacing,
+					    int align,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,
@@ -145,8 +147,13 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	size_t tmp_count = 0;
 	float *line_w = bzalloc(sizeof(float) * (size_t)line_total);
 
+	/* The last glyph on a line contributes its advance but no trailing
+	 * letter spacing, so the measured width drops one spacing unit when
+	 * the line holds at least one advanced character. */
+	const float lsp = (float)letter_spacing;
 	float pen_x = 0.0f;
 	int cur_line = 0;
+	bool line_any = false;
 
 	const char *p = utf8_text;
 	while (*p) {
@@ -156,9 +163,12 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		if (cp == '\r')
 			continue;
 		if (cp == '\n') {
-			line_w[cur_line] = pen_x;
+			line_w[cur_line] = line_any ? pen_x - lsp : pen_x;
+			if (line_w[cur_line] < 0.0f)
+				line_w[cur_line] = 0.0f;
 			++cur_line;
 			pen_x = 0.0f;
+			line_any = false;
 			continue;
 		}
 		FT_UInt gi = FT_Get_Char_Index(face, cp);
@@ -168,7 +178,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 			FT_Outline_Embolden(&face->glyph->outline,
 					    (FT_Pos)(pixel_size / 24 + 1) << 6);
 		if (FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL) != 0) {
-			pen_x += (float)(face->glyph->advance.x >> 6);
+			pen_x += (float)(face->glyph->advance.x >> 6) + lsp;
+			line_any = true;
 			continue;
 		}
 
@@ -189,9 +200,12 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 				       bm->buffer + (size_t)y * bm->pitch, w);
 		}
 		++tmp_count;
-		pen_x += (float)(face->glyph->advance.x >> 6);
+		pen_x += (float)(face->glyph->advance.x >> 6) + lsp;
+		line_any = true;
 	}
-	line_w[cur_line] = pen_x;
+	line_w[cur_line] = line_any ? pen_x - lsp : pen_x;
+	if (line_w[cur_line] < 0.0f)
+		line_w[cur_line] = 0.0f;
 
 	FT_Done_Face(face);
 	FT_Done_FreeType(lib);
@@ -219,13 +233,18 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		any = true;
 	}
 
-	if (tmp_count == 0 || !any || max_line_w < 1.0f) {
+	if (tmp_count == 0 || !any) {
 		for (size_t i = 0; i < tmp_count; ++i)
 			bfree(tmp[i].gray);
 		bfree(tmp);
 		bfree(line_w);
 		return NULL;
 	}
+	/* Strongly negative letter spacing can collapse the measured width even
+	 * though glyph bitmaps remain visible; keep a minimal canvas instead of
+	 * failing the build. */
+	if (max_line_w < 1.0f)
+		max_line_w = 1.0f;
 
 	/* Padding generous enough for the flame to rise and sparks to travel.
 	 * Top gets the most room; sides are modest. The bottom room is chosen
@@ -248,9 +267,9 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 
 	/* Capture each visible glyph's canvas rectangle so per-character effects
 	 * can address letters individually. Rect math mirrors blit_max(). Lines
-	 * are centered horizontally; line i's baseline is placed at
-	 * pad_top - min_y + i*pitch so the topmost pixel of the whole block lands
-	 * at y = pad_top. */
+	 * are aligned within the block per `align`; line i's baseline is placed
+	 * at pad_top - min_y + i*pitch so the topmost pixel of the whole block
+	 * lands at y = pad_top. */
 	struct flametext_glyph *glyphs =
 		bmalloc(sizeof(*glyphs) * (tmp_count ? tmp_count : 1));
 	size_t glyph_count = 0;
@@ -259,8 +278,12 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 	for (size_t i = 0; i < tmp_count; ++i) {
 		if (tmp[i].gray) {
 			int line = tmp[i].line;
-			int origin_x = pad_left +
-				(int)((max_line_w - line_w[line]) * 0.5f);
+			float slack = max_line_w - line_w[line];
+			int origin_x = pad_left;
+			if (align == FLAMETEXT_ALIGN_RIGHT)
+				origin_x += (int)slack;
+			else if (align != FLAMETEXT_ALIGN_LEFT)
+				origin_x += (int)(slack * 0.5f);
 			float baseline_y =
 				(float)(pad_top - min_y + line * pitch);
 			blit_max(canvas, cw, ch, &tmp[i], origin_x, baseline_y);

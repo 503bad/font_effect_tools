@@ -74,9 +74,12 @@ set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_nam
 #   package/
 #   ├─ bin/
 #   │   └─ font-effect-tools.dll
-#   └─ font-effect-tools/
-#       ├─ effects/*.effect
-#       └─ locale/*.ini
+#   ├─ font-effect-tools/
+#   │   ├─ effects/*.effect
+#   │   └─ locale/*.ini
+#   ├─ README.md
+#   ├─ LICENSE
+#   └─ SOURCE-NOTICE.txt
 install(
   TARGETS ${CMAKE_PROJECT_NAME}
   LIBRARY DESTINATION bin COMPONENT dist
@@ -98,5 +101,12 @@ install(
 install(
   DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/locale"
   DESTINATION ${CMAKE_PROJECT_NAME}
+  COMPONENT dist
+)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/README.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        "${CMAKE_CURRENT_SOURCE_DIR}/dist/SOURCE-NOTICE.txt"
+  DESTINATION .
   COMPONENT dist
 )

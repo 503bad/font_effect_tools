@@ -7,6 +7,7 @@ REM    package\bin\font-effect-tools.dll        plugin binary
 REM    package\bin\font-effect-tools.pdb        debug symbols
 REM    package\font-effect-tools\effects\*.effect
 REM    package\font-effect-tools\locale\*.ini
+REM    package\README.md / LICENSE / SOURCE-NOTICE.txt  (release docs)
 REM
 REM  Usage:
 REM    build.bat            Build (incremental) and refresh package\

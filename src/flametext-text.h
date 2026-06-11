@@ -11,6 +11,13 @@ extern "C" {
 struct gs_texture;
 typedef struct gs_texture gs_texture_t;
 
+/* Horizontal alignment of each line within the text block. */
+enum flametext_align {
+	FLAMETEXT_ALIGN_LEFT = 0,
+	FLAMETEXT_ALIGN_CENTER = 1,
+	FLAMETEXT_ALIGN_RIGHT = 2,
+};
+
 /* Canvas-space rectangle (pixels) of a single rasterized glyph within the
  * shared mask texture. Lets per-character effects draw and animate each glyph
  * as its own quad sampling its sub-region of the one coverage texture. Empty
@@ -64,8 +71,11 @@ struct flametext_mask {
  * holding the OBS graphics lock (obs_enter_graphics()).
  *
  * Text is laid out across multiple lines on embedded '\n' characters, with each
- * line centered horizontally. `line_spacing` is the baseline-to-baseline pitch
- * in pixels; pass <= 0 to use the font's natural line height (auto).
+ * line aligned within the block per `align` (enum flametext_align).
+ * `line_spacing` is the baseline-to-baseline pitch in pixels; pass <= 0 to use
+ * the font's natural line height (auto). `letter_spacing` is extra pixels added
+ * to every glyph advance; negative tightens, 0 keeps the font's natural
+ * advances (auto).
  *
  * `bottom_pad` is the empty room (in pixels) reserved below the text; pass 0
  * to use a small default. Effects that need drops/embers to travel downward
@@ -81,6 +91,8 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 					    bool bold,
 					    bool italic,
 					    int line_spacing,
+					    int letter_spacing,
+					    int align,
 					    uint32_t bottom_pad,
 					    uint32_t extra_left,
 					    uint32_t extra_right,

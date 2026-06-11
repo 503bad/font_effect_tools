@@ -60,7 +60,8 @@ static void rebuild_mask(struct flametext_source *s)
 	if (s->text && s->text[0] && s->font_path[0]) {
 		s->mask = flametext_mask_build(s->text, s->font_path,
 					       s->font_size, s->bold, s->italic,
-					       s->line_spacing, bottom_pad,
+					       s->line_spacing, s->letter_spacing,
+					       s->align, bottom_pad,
 					       mg.left, mg.right, mg.top);
 	}
 	obs_leave_graphics();
@@ -117,6 +118,14 @@ static void flametext_update(void *data, obs_data_t *settings)
 	bool line_manual = obs_data_get_int(settings, "line_mode") == 1;
 	int line_px = (int)obs_data_get_int(settings, "line_px");
 	s->line_spacing = (line_manual && line_px > 0) ? line_px : 0;
+
+	/* --- shared letter spacing (auto vs extra pixels per advance) --- */
+	s->letter_manual = obs_data_get_int(settings, "letter_mode") == 1;
+	s->letter_spacing = s->letter_manual
+		? (int)obs_data_get_int(settings, "letter_px") : 0;
+
+	/* --- shared horizontal alignment --- */
+	s->align = (int)obs_data_get_int(settings, "align");
 
 	/* --- active effect selection --- */
 	int idx = fx_registry_index(obs_data_get_string(settings, "effect"));
@@ -253,6 +262,19 @@ static bool on_line_mode_changed(void *priv, obs_properties_t *props,
 	return true;
 }
 
+/* Show the explicit pixel slider only when the letter spacing mode is manual. */
+static bool on_letter_mode_changed(void *priv, obs_properties_t *props,
+				   obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(priv);
+	UNUSED_PARAMETER(prop);
+	obs_property_t *px = obs_properties_get(props, "letter_px");
+	if (px)
+		obs_property_set_visible(px,
+			obs_data_get_int(settings, "letter_mode") == 1);
+	return true;
+}
+
 /* Show only the active effect's property group. */
 static bool on_effect_changed(void *priv, obs_properties_t *props,
 			      obs_property_t *prop, obs_data_t *settings)
@@ -294,6 +316,28 @@ static obs_properties_t *flametext_properties(void *data)
 		obs_module_text("LineSpacingPx"), 1, 2000, 1);
 	obs_property_set_visible(lpx,
 		s ? (s->line_spacing > 0) : false);
+
+	/* Shared letter spacing: auto (font's natural advances) or extra px. */
+	obs_property_t *km = obs_properties_add_list(p, "letter_mode",
+		obs_module_text("LetterSpacing"), OBS_COMBO_TYPE_LIST,
+		OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(km, obs_module_text("LetterSpacingAuto"), 0);
+	obs_property_list_add_int(km, obs_module_text("LetterSpacingManual"), 1);
+	obs_property_set_modified_callback2(km, on_letter_mode_changed, NULL);
+	obs_property_t *kpx = obs_properties_add_int_slider(p, "letter_px",
+		obs_module_text("LetterSpacingPx"), -500, 1000, 1);
+	obs_property_set_visible(kpx, s ? s->letter_manual : false);
+
+	/* Shared horizontal alignment (exclusive radio: left/center/right). */
+	obs_property_t *al = obs_properties_add_list(p, "align",
+		obs_module_text("TextAlign"), OBS_COMBO_TYPE_RADIO,
+		OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(al, obs_module_text("AlignLeft"),
+				  FLAMETEXT_ALIGN_LEFT);
+	obs_property_list_add_int(al, obs_module_text("AlignCenter"),
+				  FLAMETEXT_ALIGN_CENTER);
+	obs_property_list_add_int(al, obs_module_text("AlignRight"),
+				  FLAMETEXT_ALIGN_RIGHT);
 
 	/* Effect selector. */
 	obs_property_t *sel = obs_properties_add_list(p, "effect",
@@ -347,6 +391,9 @@ static void flametext_defaults(obs_data_t *settings)
 
 	obs_data_set_default_int(settings, "line_mode", 0); /* auto */
 	obs_data_set_default_int(settings, "line_px", 150);
+	obs_data_set_default_int(settings, "letter_mode", 0); /* auto */
+	obs_data_set_default_int(settings, "letter_px", 0);
+	obs_data_set_default_int(settings, "align", FLAMETEXT_ALIGN_CENTER);
 
 	size_t n;
 	const struct text_effect *const *fx = fx_registry(&n);

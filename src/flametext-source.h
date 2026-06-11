@@ -30,6 +30,17 @@ struct flametext_source {
 	 * 0 = auto (use the font's natural line height). Shared across effects. */
 	int      line_spacing;
 
+	/* Extra pixels added to every glyph advance (letter spacing); may be
+	 * negative to tighten. 0 = auto (the font's natural advances). Shared
+	 * across effects. `letter_manual` remembers the UI mode so the pixel
+	 * slider stays visible even at an effective spacing of 0. */
+	int      letter_spacing;
+	bool     letter_manual;
+
+	/* Horizontal alignment of each line within the text block
+	 * (enum flametext_align). Shared across effects. */
+	int      align;
+
 	/* Shared rasterized text coverage mask. */
 	struct flametext_mask *mask;
 

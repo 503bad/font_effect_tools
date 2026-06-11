@@ -1,4 +1,5 @@
 build_*/
+build_log.txt
 .deps/
 .cache/
 .vs/
@@ -7,9 +8,11 @@ vcpkg_installed/
 CMakeUserPresets.json
 *.user
 
-# Generated install payload (rebuild with: cmake --install ... --prefix package).
-# The helper scripts/notes in package/ are kept; only the built tree is ignored.
-/package/font-effect-tools/
+# Generated install payload. build.bat wipes and restages this whole tree on
+# every run (cmake --install ... --component dist --prefix package), including
+# the bundled README.md / LICENSE / SOURCE-NOTICE.txt, so nothing in it is
+# hand-maintained.
+/package/
 
 # Release staging / distributable archives (attached to GitHub Releases, not tracked).
 /release/
