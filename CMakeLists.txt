@@ -34,6 +34,7 @@ target_sources(
     src/plugin-main.c
     src/flametext-source.c
     src/flametext-text.c
+    src/flametext-ftload.c
     src/flametext-particles.c
     src/flametext-outline.c
     src/effect-registry.c

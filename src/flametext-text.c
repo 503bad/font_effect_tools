@@ -1,4 +1,5 @@
 #include "flametext-text.h"
+#include "flametext-ftload.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -332,14 +333,16 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		return NULL;
 	}
 	FT_Face face;
-	if (FT_New_Face(lib, font_path, 0, &face) != 0) {
-		obs_log(LOG_ERROR, "FT_New_Face failed for %s", font_path);
+	void *face_data = NULL;
+	if (!flametext_ft_new_face_utf8(lib, font_path, 0, &face, &face_data)) {
+		obs_log(LOG_ERROR, "could not open font file %s", font_path);
 		FT_Done_FreeType(lib);
 		return NULL;
 	}
 	if (FT_Set_Pixel_Sizes(face, 0, pixel_size) != 0) {
 		obs_log(LOG_ERROR, "FT_Set_Pixel_Sizes failed (size=%u)", pixel_size);
 		FT_Done_Face(face);
+		bfree(face_data);
 		FT_Done_FreeType(lib);
 		return NULL;
 	}
@@ -367,6 +370,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 							  extra_right,
 							  extra_top);
 		FT_Done_Face(face);
+		bfree(face_data);
 		FT_Done_FreeType(lib);
 		return m;
 	}
@@ -448,6 +452,7 @@ struct flametext_mask *flametext_mask_build(const char *utf8_text,
 		line_w[cur_line] = 0.0f;
 
 	FT_Done_Face(face);
+	bfree(face_data);
 	FT_Done_FreeType(lib);
 
 	/* Widest line drives the canvas width; the block's vertical extent is

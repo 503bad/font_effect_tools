@@ -1,4 +1,5 @@
 #include "flametext-font-resolve.h"
+#include "flametext-ftload.h"
 
 #ifdef _WIN32
 
@@ -222,14 +223,12 @@ static bool enumerate_dir(FT_Library lib, const wchar_t *dir,
 		wchar_t fullw[MAX_PATH];
 		_snwprintf_s(fullw, MAX_PATH, _TRUNCATE, L"%s\\%s", dir, fd.cFileName);
 
-		char fullu[MAX_PATH * 3];
-		if (!wide_to_utf8(fullw, fullu, sizeof(fullu)))
-			continue;
-
 		FT_Long n_faces = 1;
 		for (FT_Long fi = 0; fi < n_faces && !matched; ++fi) {
 			FT_Face face;
-			if (FT_New_Face(lib, fullu, fi, &face) != 0)
+			void *face_data;
+			if (!flametext_ft_new_face_w(lib, fullw, fi, &face,
+						     &face_data))
 				continue;
 			n_faces = face->num_faces;
 			if (face_name_matches(face, want_utf8)) {
@@ -237,6 +236,7 @@ static bool enumerate_dir(FT_Library lib, const wchar_t *dir,
 				matched = true;
 			}
 			FT_Done_Face(face);
+			bfree(face_data);
 		}
 	} while (!matched && FindNextFileW(h, &fd));
 
