@@ -1,0 +1,104 @@
+/* Geometric warp — a host-level post-process that redraws the captured frame
+ * of the active effect (plus its outer glow) through a tessellated grid mesh.
+ * Each grid vertex carries its source uv in BOTH the position and texcoord
+ * attributes; the vertex shader treats the position as a normalized 0..1 cell
+ * coordinate, displaces it in canvas pixels (perspective taper, the two
+ * shears, then a circular arch), and the pixel shader simply samples the flat
+ * captured texture at the untouched uv. The capture holds premultiplied
+ * colour, so the host composites the result src-over. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* captured effect frame (premultiplied RGBA) */
+
+uniform float2 canvas;     /* capture size in px                         */
+uniform float4 tbox;       /* text band: cx, cy, tw, th (canvas px)      */
+uniform float2 stretch;    /* horizontal / vertical scale (1 = neutral)  */
+uniform float  arch;       /* -1..1; |1| == full circle (+ = ∩, - = ∪)  */
+uniform float  persp;      /* -1..1; + tapers top edge, - bottom edge    */
+uniform float  shear_h;    /* slope; top vs bottom opposite horizontal   */
+uniform float  shear_v;    /* slope; left vs right opposite vertical     */
+
+sampler_state warpSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSWarp(VertData v)
+{
+	VertData o;
+
+	float2 uv = v.pos.xy;          /* normalized 0..1 grid coordinate */
+	float2 px = uv * canvas;       /* source pixel position           */
+
+	float cx = tbox.x;
+	float cy = tbox.y;
+	float tw = max(tbox.z, 1.0);
+	float th = max(tbox.w, 1.0);
+
+	/* Work relative to the text-band centre so the deformations pivot
+	 * about the text rather than the padded canvas corner. */
+	float rx = px.x - cx;
+	float ry = px.y - cy;
+
+	/* Taper axis from the unscaled vertical position so the perspective
+	 * pivot stays stable regardless of the stretch. */
+	float t = clamp(ry / th + 0.5, 0.0, 1.0);
+
+	/* Stretch: independent horizontal/vertical scale about the centre. */
+	rx *= stretch.x;
+	ry *= stretch.y;
+
+	/* Perspective taper: scale the horizontal extent by a factor that
+	 * depends on the vertical position. Positive narrows the top edge,
+	 * negative the bottom edge. */
+	float ap = abs(persp);
+	float pscale = 1.0 - ap * (persp >= 0.0 ? (1.0 - t) : t);
+	rx *= pscale;
+
+	/* Shear (parallelograms): horizontal shift grows with vertical
+	 * distance, then vertical shift grows with horizontal distance. */
+	rx += shear_h * ry;
+	ry += shear_v * rx;
+
+	/* Arch: wrap the (already sheared/tapered) shape around a circle.
+	 * span is the total swept angle across the text width; R0 is the
+	 * baseline radius so the text width keeps its arc length. s selects
+	 * the curve direction (∩ for +, ∪ for -). */
+	float ab = abs(arch);
+	if (ab > 1e-4) {
+		float span = ab * 6.28318530718;
+		float R0 = tw / span;
+		float s = arch >= 0.0 ? 1.0 : -1.0;
+		float theta = rx / R0;
+		float r = R0 - s * ry;
+		float nx = r * sin(theta);
+		float ny = s * R0 - s * r * cos(theta);
+		rx = nx;
+		ry = ny;
+	}
+
+	float2 outpx = float2(cx + rx, cy + ry);
+	o.pos = mul(float4(outpx, 0.0, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSWarp(VertData v) : TARGET
+{
+	return image.Sample(warpSampler, v.uv);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSWarp(v);
+		pixel_shader  = PSWarp(v);
+	}
+}

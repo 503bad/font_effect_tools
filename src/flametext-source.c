@@ -72,6 +72,23 @@ static void rebuild_mask(struct flametext_source *s)
 					       s->align, bottom_pad,
 					       mg.left, mg.right, mg.top,
 					       s->writing_dir == 1);
+
+		/* The warp deforms the whole composited frame and can push the
+		 * text past the canvas edge. Its reach depends on the text-band
+		 * geometry, which only the built mask reveals, so reserve the
+		 * room in a second pass once the first build is measured. */
+		struct fx_margins wm;
+		fx_warp_margins(&s->warp, s->mask, &wm);
+		if (s->mask && (wm.left || wm.right || wm.top || wm.bottom)) {
+			uint32_t wbottom = bottom_pad + wm.bottom;
+			flametext_mask_free(s->mask);
+			s->mask = flametext_mask_build(
+				s->text, s->font_path, s->font_size, s->bold,
+				s->italic, s->line_spacing, s->letter_spacing,
+				s->align, wbottom, mg.left + wm.left,
+				mg.right + wm.right, mg.top + wm.top,
+				s->writing_dir == 1);
+		}
 	}
 	obs_leave_graphics();
 
@@ -149,8 +166,9 @@ static void flametext_update(void *data, obs_data_t *settings)
 			fx[i]->update(s->states[i], settings);
 	}
 
-	/* --- shared outer glow (before rebuild_mask: it affects margins) */
+	/* --- shared outer glow / warp (before rebuild_mask: both add margins) */
 	fx_oglow_update(&s->oglow, settings);
+	fx_warp_update(&s->warp, settings);
 
 	rebuild_mask(s);
 }
@@ -174,6 +192,7 @@ static void *flametext_create(obs_data_t *settings, obs_source_t *source)
 			fx[i]->load_graphics(s->states[i]);
 	}
 	fx_oglow_load(&s->oglow);
+	fx_warp_load(&s->warp);
 	obs_leave_graphics();
 
 	flametext_update(s, settings);
@@ -194,6 +213,7 @@ static void flametext_destroy(void *data)
 	if (s->mask)
 		flametext_mask_free(s->mask);
 	fx_oglow_free(&s->oglow);
+	fx_warp_free(&s->warp);
 	obs_leave_graphics();
 
 	bfree(s->states);
@@ -251,6 +271,11 @@ static void flametext_video_render(void *data, gs_effect_t *unused)
 	struct fx_render_ctx ctx;
 	fill_ctx(s, &ctx);
 
+	/* Geometric warp wraps the whole frame: capture the effect (and its
+	 * outer glow) offscreen, then redraw it deformed. When neutral this
+	 * is a no-op and rendering goes straight to the scene. */
+	bool warping = fx_warp_begin(&s->warp, ctx.width, ctx.height);
+
 	/* Outer glow: capture the effect offscreen, lay the halo on the scene
 	 * first (behind everything it drew), then composite the frame on top. */
 	if (fx_oglow_begin(&s->oglow, ctx.width, ctx.height)) {
@@ -259,6 +284,9 @@ static void flametext_video_render(void *data, gs_effect_t *unused)
 	} else {
 		fx->render(s->states[s->active], &ctx);
 	}
+
+	if (warping)
+		fx_warp_end(&s->warp, ctx.width, ctx.height, s->mask);
 }
 
 static uint32_t flametext_get_width(void *data)
@@ -418,7 +446,9 @@ static obs_properties_t *flametext_properties(void *data)
 			obs_module_text(fx[i]->name_key), OBS_GROUP_NORMAL, grp);
 	}
 
-	/* Shared outer glow, below the effect groups (applies to all of them). */
+	/* Shared geometric warp + outer glow, below the effect groups
+	 * (both apply to whichever effect is active). */
+	fx_warp_get_properties(p);
 	fx_oglow_get_properties(p);
 
 	/* Initial visibility based on the currently active effect. */
@@ -466,6 +496,7 @@ static void flametext_defaults(obs_data_t *settings)
 			fx[i]->get_defaults(settings);
 	}
 
+	fx_warp_get_defaults(settings);
 	fx_oglow_get_defaults(settings);
 }
 

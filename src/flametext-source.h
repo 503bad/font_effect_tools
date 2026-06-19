@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "flametext-outerglow.h"
+#include "flametext-warp.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,6 +54,9 @@ struct flametext_source {
 
 	/* Host-level outer glow layered behind the active effect's output. */
 	struct fx_outerglow oglow;
+
+	/* Host-level geometric warp applied to the composited effect frame. */
+	struct fx_warp warp;
 
 	/* One state blob per registered effect, parallel to fx_registry(). */
 	void **states;
