@@ -1,0 +1,87 @@
+/* Storyteller — a Star-Wars-style perspective crawl. The coverage mask's text
+ * band is projected onto a ground plane that recedes toward a vanishing line
+ * near the top of the canvas and scrolls from the foreground into the distance.
+ * Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* GS_R8 coverage mask; .r = coverage */
+
+uniform float4 band;       /* (left, right, top, bottom) normalized text band */
+uniform float4 color;      /* text colour                                     */
+uniform float  horizon;    /* screen v of the vanishing line (0..1)           */
+uniform float  scroll;     /* scroll offset, normalized texture-v units       */
+uniform float  density;    /* texture-v per unit ground depth                 */
+uniform float  period;     /* loop period, normalized texture-v units         */
+uniform float  loopf;      /* 1 = loop, 0 = one-shot                          */
+uniform float  fadef;      /* 1 = fade in/out enabled                         */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float4 PSCrawl(VertData v) : TARGET
+{
+	float sy = v.uv.y;
+	if (sy <= horizon)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	/* 0 at the horizon (far) .. 1 at the bottom (near). */
+	float pp = (sy - horizon) / (1.0 - horizon);
+	pp = max(pp, 1e-3);
+
+	/* Ground-plane depth: 0 in the foreground, growing toward the horizon. */
+	float depth = (1.0 - pp) / pp;
+
+	/* Horizontal convergence: the row narrows as it recedes. */
+	float u_local = (v.uv.x - 0.5) / pp + 0.5;
+	if (u_local < 0.0 || u_local > 1.0)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	/* Text content coordinate (normalized texture-v), scrolling away. */
+	float tv = scroll - depth * density;
+	if (loopf > 0.5)
+		tv = frac(tv / period) * period;
+
+	float bandH = band.w - band.z;
+	if (tv < 0.0 || tv > bandH)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	float2 muv = float2(band.x + u_local * (band.y - band.x),
+			    band.z + tv);
+	float cov = image.Sample(maskSampler, muv).r;
+
+	/* Distant rows dim for depth; optional fade in (bottom) / out (far). */
+	float alpha = lerp(0.45, 1.0, saturate(pp));
+	if (fadef > 0.5) {
+		float fin = smoothstep(1.0, 0.85, pp);
+		float fout = smoothstep(0.0, 0.30, pp);
+		alpha *= fin * fout;
+	}
+
+	float a = cov * color.a * alpha;
+	return float4(color.rgb * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSCrawl(v);
+	}
+}

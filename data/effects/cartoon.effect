@@ -1,0 +1,105 @@
+/* Cartoon — retro low-frame-rate "line boil". A per-frame (stepped) spatial
+ * noise field warps the coverage mask so the letters wobble in discrete jumps
+ * like hand-drawn animation, with a dilated, soft ink bleed around the edges.
+ * Premultiplied output. */
+
+uniform float4x4 ViewProj;
+uniform texture2d image;   /* GS_R8 coverage mask; .r = coverage */
+
+uniform float4 color;      /* text colour                       */
+uniform float2 texel;      /* (1/width, 1/height)               */
+uniform float  step_seed;  /* quantized time → new boil per frame */
+uniform float  freq;       /* boil cells across the width        */
+uniform float  amp;        /* warp amplitude in pixels           */
+uniform float  bleed;      /* 0..1 edge bleed amount             */
+
+sampler_state maskSampler {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v)
+{
+	VertData o;
+	o.pos = mul(float4(v.pos.xyz, 1.0), ViewProj);
+	o.uv = v.uv;
+	return o;
+}
+
+float hash21(float2 p)
+{
+	p = frac(p * float2(123.34, 456.21));
+	p += dot(p, p + 45.32);
+	return frac(p.x * p.y);
+}
+
+float vnoise(float2 p)
+{
+	float2 i = floor(p);
+	float2 f = frac(p);
+	float a = hash21(i);
+	float b = hash21(i + float2(1.0, 0.0));
+	float c = hash21(i + float2(0.0, 1.0));
+	float d = hash21(i + float2(1.0, 1.0));
+	float2 u = f * f * (3.0 - 2.0 * f);
+	return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+float sample_cov(float2 uv)
+{
+	return image.Sample(maskSampler, uv).r;
+}
+
+float4 PSCartoon(VertData v) : TARGET
+{
+	/* Per-frame boil: the noise field is shifted by the stepped seed so the
+	 * warp snaps to a new shape each "frame" rather than flowing smoothly. */
+	float2 np = v.uv * freq + step_seed * 13.7;
+	float nx = vnoise(np) - 0.5;
+	float ny = vnoise(np + 31.7) - 0.5;
+
+	/* Whole-letter wobble that also jumps each frame. */
+	float gx = vnoise(float2(step_seed, 3.1)) - 0.5;
+	float gy = vnoise(float2(7.7, step_seed)) - 0.5;
+
+	float2 duv = (float2(nx, ny) * 2.0 + float2(gx, gy)) * amp * texel;
+	float2 suv = v.uv + duv;
+
+	float cov = sample_cov(suv);
+
+	/* Dilate for ragged, thicker hand-inked strokes. */
+	float2 o = texel * (1.0 + bleed * 5.0);
+	float dil = cov;
+	dil = max(dil, sample_cov(suv + float2(o.x, 0.0)));
+	dil = max(dil, sample_cov(suv - float2(o.x, 0.0)));
+	dil = max(dil, sample_cov(suv + float2(0.0, o.y)));
+	dil = max(dil, sample_cov(suv - float2(0.0, o.y)));
+
+	/* Soft ink bleed: a faint averaged fringe around the strokes. */
+	float2 o2 = texel * (2.0 + bleed * 9.0);
+	float blur = 0.0;
+	blur += sample_cov(suv + float2(o2.x, o2.y));
+	blur += sample_cov(suv + float2(-o2.x, o2.y));
+	blur += sample_cov(suv + float2(o2.x, -o2.y));
+	blur += sample_cov(suv + float2(-o2.x, -o2.y));
+	blur *= 0.25;
+
+	float covOut = saturate(max(dil, blur * bleed * 0.6));
+	float a = covOut * color.a;
+	return float4(color.rgb * a, a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v);
+		pixel_shader  = PSCartoon(v);
+	}
+}

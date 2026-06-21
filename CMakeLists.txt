@@ -70,6 +70,12 @@ target_sources(
     src/effect-slime.c
     src/effect-wave.c
     src/effect-flip.c
+    src/effect-storyteller.c
+    src/effect-fontswitch.c
+    src/effect-roll.c
+    src/effect-outliner.c
+    src/effect-puzzle.c
+    src/effect-cartoon.c
 )
 
 if(WIN32)
