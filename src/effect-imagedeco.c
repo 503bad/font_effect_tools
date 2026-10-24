@@ -3,7 +3,6 @@
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
-#include <graphics/image-file.h>
 #include <util/bmem.h>
 
 #include <math.h>
@@ -31,7 +30,7 @@ struct imagedeco_state {
 
 	char     path[1024];   /* requested image path  */
 	char     loaded[1024]; /* currently loaded path */
-	gs_image_file_t imgfile;
+	gs_texture_t   *tex;
 	bool     has_image;
 
 	float    text_h;
@@ -59,8 +58,8 @@ static void imagedeco_destroy(void *data)
 	if (!s)
 		return;
 	/* Graphics lock held by the host. */
-	if (s->has_image)
-		gs_image_file_free(&s->imgfile);
+	if (s->tex)
+		gs_texture_destroy(s->tex);
 	if (s->sprite)
 		gs_effect_destroy(s->sprite);
 	if (s->fill)
@@ -197,18 +196,17 @@ static gs_texture_t *ensure_image(struct imagedeco_state *s)
 {
 	if (strcmp(s->path, s->loaded) != 0) {
 		if (s->has_image) {
-			gs_image_file_free(&s->imgfile);
+			gs_texture_destroy(s->tex);
+			s->tex = NULL;
 			s->has_image = false;
 		}
 		if (s->path[0]) {
-			memset(&s->imgfile, 0, sizeof(s->imgfile));
-			gs_image_file_init(&s->imgfile, s->path);
-			gs_image_file_init_texture(&s->imgfile);
-			s->has_image = s->imgfile.texture != NULL;
+			s->tex = gs_texture_create_from_file(s->path);
+			s->has_image = s->tex != NULL;
 		}
 		snprintf(s->loaded, sizeof(s->loaded), "%s", s->path);
 	}
-	return s->has_image ? s->imgfile.texture : NULL;
+	return s->tex;
 }
 
 static void imagedeco_render(void *data, const struct fx_render_ctx *ctx)
