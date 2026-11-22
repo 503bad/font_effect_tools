@@ -14,20 +14,19 @@ OBS では **ソースの追加 →「Font Effect Tools」** に表示されま�
 ## パッケージの構成
 
 `dist` インストールコンポーネント（配布 ZIP）は、配布するそのままのツリーを
-出力します。
+出力します。プラグインフォルダは OBS 33 以降の公式の構成
+（[Legacy Plugin Developer Info](https://obsproject.com/kb/legacy-plugin-developer-info)）
+に合わせています。
 
 ```
 package/
-├─ bin/
-│   ├─ font-effect-tools.dll
-│   └─ font-effect-tools.pdb
 ├─ font-effect-tools/
-│   ├─ effects/*.effect（flame, spark, rainbow, neon, bloom, waterdrop,
-│   │                    glitch, watersurface, spotlight, chroma, godray,
-│   │                    scanline, arc, circuit, sprite, textfill, outline,
-│   │                    glow, slice, slime, wave, storyteller,
-│   │                    cartoon の全 23 ファイル）
-│   └─ locale/{en-US,ja-JP}.ini
+│   ├─ font-effect-tools.dll
+│   ├─ font-effect-tools.pdb
+│   └─ data/
+│       ├─ effects/*.effect
+│       └─ locale/{en-US,ja-JP}.ini
+├─ install.bat
 ├─ README.md
 ├─ LICENSE
 └─ SOURCE-NOTICE.txt
@@ -35,16 +34,44 @@ package/
 
 ## OBS へのインストール
 
-モジュール名は `font-effect-tools` なので、OBS データディレクトリ名も
-**必ず** `font-effect-tools`（DLL のベース名と一致）にします。2 つの部分を
-次のように配置します。
+### インストーラーを使う（推奨）
 
-- `bin/` 配下のファイルすべて → `<obs>/obs-plugins/64bit/` 配下へ
-- `font-effect-tools/` フォルダ（effects + locale） →
-  `<obs>/data/obs-plugins/` 配下へフォルダごとコピー
+1. OBS を完全に終了します。
+2. ZIP をすべて展開し、`install.bat` を**ダブルクリック**します。管理者権限の確認（UAC）が出たら「はい」を選ぶと、新しいウィンドウでインストールが進みます。
 
-（`<obs>` は OBS のインストール先。例: `C:\Program Files\obs-studio`。）配置後は
-OBS を完全に再起動してください。
+`install.bat` は次のことを自動で行います。
+
+- OBS のインストール先を探します（レジストリ → `C:\Program Files\obs-studio`）。
+  見つからない場合は、`install.bat "D:\Apps\obs-studio"` のように OBS のフォルダを
+  指定してください。
+- `obs64.exe` のバージョンを読み取り、そのバージョンが読み込む場所に配置します。
+  - **OBS 33 以降**：`C:\ProgramData\obs-studio\plugins\font-effect-tools\font-effect-tools.dll`
+    と `...\font-effect-tools\data\`
+  - **OBS 32 以前**：`C:\ProgramData\obs-studio\plugins\font-effect-tools\bin\64bit\font-effect-tools.dll`
+    と `...\font-effect-tools\data\`
+  - **ポータブル版 OBS 33 以降**：`<OBS のフォルダ>\plugins\font-effect-tools\`
+    （ポータブル版 OBS 32 以前はインストーラーの対象外です）
+- 以前のバージョンが旧方式の場所（`<OBS>\obs-plugins\64bit\` と
+  `<OBS>\data\obs-plugins\font-effect-tools\`）にあれば削除します。
+  旧方式の場所は OBS 34 以降で読み込まれなくなる予定です。
+- 以前のバージョンの不要なファイル（古いエフェクトなど）も削除します。
+
+`install.bat /check` を実行すると、何も変更せずに、見つけた OBS・バージョン・
+インストール先・削除対象を表示します（管理者権限は不要です）。うまく動かないときは
+この表示を添えてお知らせください。
+
+### 手動でインストールする
+
+OBS を終了し、ZIP の中の `font-effect-tools` フォルダを次の場所にフォルダごと
+コピーします。フォルダ名は必ず `font-effect-tools`（DLL のベース名と一致）にします。
+
+- **OBS 33 以降**：`C:\ProgramData\obs-studio\plugins\` の中へそのまま
+- **OBS 32 以前**：同じ場所にコピーしたあと、`font-effect-tools.dll` と
+  `font-effect-tools.pdb` を `font-effect-tools\bin\64bit\` の中へ移動
+
+以前に `C:\Program Files\obs-studio\obs-plugins\64bit\font-effect-tools.dll` と
+`C:\Program Files\obs-studio\data\obs-plugins\font-effect-tools\` に入れていた
+場合は、それらを削除してください。
 
 ## クレジット表記のお願い
 
@@ -905,14 +932,12 @@ build.bat clean      build_x64\ と package\ を削除してフルビルド
 > PowerShell から実行する場合は `.\build.bat`（または `cmd /c build.bat`）と
 > 入力してください。
 >
-> **OBS への配置について:** 仕上げに `package\` の内容を OBS のインストール先
-> （既定 `C:\Program Files\obs-studio`）へコピーします。
-> `package\font-effect-tools\` → `…\data\obs-plugins\font-effect-tools\`、
-> `package\bin\` の DLL/PDB → `…\obs-plugins\64bit\` です。`Program Files` への
-> 書き込みには**管理者権限**が必要なので、**「管理者として実行」したコマンド
-> プロンプトから、OBS を閉じた状態で** `build.bat` を実行してください（権限が
-> ない場合はビルド／package 化までは成功し、配置のみスキップ／失敗します）。
-> OBS の場所が異なるときは `build.bat` 冒頭の `OBS_DIR` を編集してください。
+> **OBS への配置について:** 仕上げに `package\install.bat` を実行し、配布物と
+> 同じインストーラーでローカルの OBS に配置します（旧方式の場所にある古い
+> コピーの削除と、`C:\ProgramData\obs-studio\plugins\font-effect-tools\` への
+> 配置）。**「管理者として実行」したコマンドプロンプトから、OBS を閉じた状態で**
+> `build.bat` を実行してください（権限がない場合や OBS 起動中は、ビルド／package
+> 化までは成功し、配置のみ失敗します）。
 
 CMake を直接使う場合:
 
