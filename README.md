@@ -1,5 +1,10 @@
 # Font Effect Tools（OBS ソースプラグイン）
 
+> **📥 最新版のダウンロード：[release.zip（Windows x64）](https://github.com/503bad/font_effect_tools/releases/latest/download/release.zip)**
+> ／ [リリースページ（更新内容）](https://github.com/503bad/font_effect_tools/releases/latest)
+>
+> 展開した `install.bat` をダブルクリックするとインストールできます（詳しくは「[OBS へのインストール](#obs-へのインストール)」）。
+
 入力したテキストにさまざまな**エフェクト**を適用して表示する OBS Studio の
 **入力ソース**です。エフェクトは複数の中から選択でき、エフェクトごとに専用の
 パラメーターを持ちます。テキスト・フォント・行間・文字間・揃え位置の設定は
