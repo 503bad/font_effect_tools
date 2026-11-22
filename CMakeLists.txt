@@ -90,7 +90,8 @@ set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_nam
 #
 # The plugin folder uses the OBS 33+ layout (flat module + data/), see
 # https://obsproject.com/kb/legacy-plugin-developer-info . install.bat copies
-# it to %ProgramData%\obs-studio\plugins\ (and rearranges it for OBS 32).
+# it to %ProgramData%\obs-studio\plugins\ (plus a bin\64bit copy of the DLL
+# so OBS 32 loads it too).
 #
 #   package/
 #   ├─ font-effect-tools/

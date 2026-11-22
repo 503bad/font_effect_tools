@@ -46,33 +46,36 @@ package/
 
 `install.bat` は次のことを自動で行います。
 
-- OBS のインストール先を探します（レジストリ → `C:\Program Files\obs-studio`）。
-  見つからない場合は、`install.bat "D:\Apps\obs-studio"` のように OBS のフォルダを
-  指定してください。
-- `obs64.exe` のバージョンを読み取り、そのバージョンが読み込む場所に配置します。
-  - **OBS 33 以降**：`C:\ProgramData\obs-studio\plugins\font-effect-tools\font-effect-tools.dll`
-    と `...\font-effect-tools\data\`
-  - **OBS 32 以前**：`C:\ProgramData\obs-studio\plugins\font-effect-tools\bin\64bit\font-effect-tools.dll`
-    と `...\font-effect-tools\data\`
-  - **ポータブル版 OBS 33 以降**：`<OBS のフォルダ>\plugins\font-effect-tools\`
-    （ポータブル版 OBS 32 以前はインストーラーの対象外です）
+- `C:\ProgramData\obs-studio\plugins\font-effect-tools\` に、DLL を
+  **OBS 33 以降の置き方と OBS 32 以前の置き方の両方**で配置します。OBS のバージョンに
+  関係なく読み込まれ、32 から 33 へ更新したあともそのまま使えます
+  （OBS 33 は新しい置き方を先に読み込み、もう一方は読み飛ばします）。
+  - `...\font-effect-tools\font-effect-tools.dll`（OBS 33 以降）
+  - `...\font-effect-tools\bin\64bit\font-effect-tools.dll`（OBS 32 以前）
+  - `...\font-effect-tools\data\`
+- OBS の場所（レジストリ → `C:\Program Files\obs-studio`）は、古いコピーの削除と
+  ポータブル版の判定にだけ使います。見つからなくてもインストールは続けます。
+  - **ポータブル版 OBS 33 以降**は `install.bat "D:\Apps\obs-studio"` のように
+    OBS のフォルダを指定してください（`<OBS のフォルダ>\plugins\font-effect-tools\` に入ります。
+    ポータブル版 OBS 32 以前はインストーラーの対象外です）。
 - 以前のバージョンが旧方式の場所（`<OBS>\obs-plugins\64bit\` と
   `<OBS>\data\obs-plugins\font-effect-tools\`）にあれば削除します。
   旧方式の場所は OBS 34 以降で読み込まれなくなる予定です。
 - 以前のバージョンの不要なファイル（古いエフェクトなど）も削除します。
 
-`install.bat /check` を実行すると、何も変更せずに、見つけた OBS・バージョン・
-インストール先・削除対象を表示します（管理者権限は不要です）。うまく動かないときは
-この表示を添えてお知らせください。
+インストールのたびに、`install.bat` と同じフォルダへ `install-log.txt`（見つけた OBS・
+インストール先・PC にあるプラグインの DLL の一覧）を書き出します。うまく動かないときは
+このファイルと OBS のログを添えてお知らせください。`install.bat /check` を実行すると、
+何も変更せずにインストール先などを画面に表示します（管理者権限は不要です）。
 
 ### 手動でインストールする
 
 OBS を終了し、ZIP の中の `font-effect-tools` フォルダを次の場所にフォルダごと
 コピーします。フォルダ名は必ず `font-effect-tools`（DLL のベース名と一致）にします。
 
-- **OBS 33 以降**：`C:\ProgramData\obs-studio\plugins\` の中へそのまま
-- **OBS 32 以前**：同じ場所にコピーしたあと、`font-effect-tools.dll` と
-  `font-effect-tools.pdb` を `font-effect-tools\bin\64bit\` の中へ移動
+- `C:\ProgramData\obs-studio\plugins\` の中へそのままコピーし、さらに
+  `font-effect-tools.dll` と `font-effect-tools.pdb` を `font-effect-tools\bin\64bit\`
+  にもコピーします（両方に置くと OBS 32 / 33 のどちらでも読み込まれます）
 
 以前に `C:\Program Files\obs-studio\obs-plugins\64bit\font-effect-tools.dll` と
 `C:\Program Files\obs-studio\data\obs-plugins\font-effect-tools\` に入れていた

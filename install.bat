@@ -12,11 +12,13 @@ REM    2. Refuses to run while OBS is running.
 REM    3. Removes old copies from the legacy Program Files location:
 REM         <obs>\obs-plugins\64bit\font-effect-tools.dll / .pdb
 REM         <obs>\data\obs-plugins\font-effect-tools\
-REM    4. Installs into the location that OBS version actually loads:
-REM         OBS 33+ : %ProgramData%\obs-studio\plugins\font-effect-tools\
-REM                     font-effect-tools.dll, data\
-REM         OBS 32- : %ProgramData%\obs-studio\plugins\font-effect-tools\
-REM                     bin\64bit\font-effect-tools.dll, data\
+REM    4. Installs into %ProgramData%\obs-studio\plugins\font-effect-tools\ with
+REM       the DLL in BOTH places OBS looks for it:
+REM         font-effect-tools.dll            (OBS 33+ layout)
+REM         bin\64bit\font-effect-tools.dll  (OBS 32 layout; OBS 33 skips it
+REM                                    once the one above is loaded)
+REM       so it does not depend on detecting the OBS version (several OBS
+REM       installs, upgrades 32 -> 33, an OBS the registry does not know).
 REM         Portable OBS 33+ : <obs>\plugins\font-effect-tools\ (flat)
 REM       The plugin folder is mirrored, so files from older versions are
 REM       removed.
@@ -27,12 +29,15 @@ REM    install.bat "D:\obs-studio" Install, using this OBS folder
 REM    install.bat /check [dir]    Only show what would be done (no admin)
 REM    /nopause                    Do not wait for a key at the end, and do
 REM                                not self-elevate (for use from scripts)
+REM
+REM  Every run (except /check) writes install-log.txt next to this file.
 REM ============================================================================
 setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "PLUGIN=font-effect-tools"
 set "SRC=%~dp0%PLUGIN%"
+set "LOGFILE=%~dp0install-log.txt"
 set "CHECK_ONLY=0"
 set "NOPAUSE=0"
 set "ELEVATED=0"
@@ -72,12 +77,24 @@ set "OBS_DIR=%ProgramFiles%\obs-studio"
 :have_obs_dir
 if "%OBS_DIR:~-1%"=="\" set "OBS_DIR=%OBS_DIR:~0,-1%"
 
-if not exist "%OBS_DIR%\bin\64bit\obs64.exe" (
-    echo [error] OBS not found at "%OBS_DIR%" ^(from %OBS_FROM%^).
-    echo         Pass the OBS folder explicitly, e.g.:
+set "OBS_MAJOR=0"
+set "OBS_VERSION=unknown"
+set "PORTABLE=0"
+if exist "%OBS_DIR%\bin\64bit\obs64.exe" goto :obs_found
+if "%OBS_FROM%"=="argument" (
+    echo [error] OBS not found at "%OBS_DIR%".
+    echo         Pass the folder that contains bin\64bit\obs64.exe, e.g.:
     echo           install.bat "D:\Apps\obs-studio"
     goto :fail
 )
+REM An installed OBS loads plugins from %ProgramData% wherever it lives, so
+REM this is not fatal; only the clean-up of its old copies is skipped.
+echo   [note] OBS was not found at "%OBS_DIR%" ^(from %OBS_FROM%^).
+echo          Installing for the installed OBS anyway. For a portable OBS, run:
+echo            install.bat "D:\path\to\obs-studio"
+set "OBS_FROM=%OBS_FROM%, not found"
+goto :obs_checked
+:obs_found
 
 set "OBS_MAJOR="
 set "OBS_VERSION="
@@ -86,21 +103,18 @@ for /f "tokens=1,2" %%A in ('powershell -NoProfile -Command "$v=(Get-Item -Liter
     set "OBS_VERSION=%%B"
 )
 set /a OBS_MAJOR=OBS_MAJOR+0 >nul 2>&1
-if %OBS_MAJOR% LSS 1 (
-    echo [error] Could not read the version of "%OBS_DIR%\bin\64bit\obs64.exe".
-    goto :fail
-)
+if not defined OBS_VERSION set "OBS_VERSION=unknown"
 
-set "PORTABLE=0"
 if exist "%OBS_DIR%\obs_portable_mode"     set "PORTABLE=1"
 if exist "%OBS_DIR%\portable_mode.txt"     set "PORTABLE=1"
 if exist "%OBS_DIR%\obs_portable_mode.txt" set "PORTABLE=1"
+:obs_checked
 
 REM --- 2. decide destination + layout ---------------------------------------
-REM  LAYOUT=flat  : <dest>\font-effect-tools.dll + <dest>\data\   (OBS 33+)
-REM  LAYOUT=bin64 : <dest>\bin\64bit\font-effect-tools.dll + <dest>\data\
+REM  LAYOUT=flat : <dest>\NAME.dll + <dest>\data\                  (portable OBS 33+)
+REM  LAYOUT=both : flat + <dest>\bin\64bit\NAME.dll                 (installed OBS 32 / 33+)
 if "%PORTABLE%"=="1" (
-    if %OBS_MAJOR% LSS 33 (
+    if %OBS_MAJOR% LSS 33 if not "%OBS_MAJOR%"=="0" (
         echo [error] Portable OBS %OBS_VERSION% is not supported by this installer.
         echo         OBS 32 portable only loads plugins from its own obs-plugins
         echo         folder. Update OBS to 33 or later, or install manually.
@@ -110,7 +124,7 @@ if "%PORTABLE%"=="1" (
     set "LAYOUT=flat"
 ) else (
     set "DEST=%ProgramData%\obs-studio\plugins\%PLUGIN%"
-    if %OBS_MAJOR% GEQ 33 (set "LAYOUT=flat") else (set "LAYOUT=bin64")
+    set "LAYOUT=both"
 )
 
 set "LEGACY_DLL=%OBS_DIR%\obs-plugins\64bit\%PLUGIN%.dll"
@@ -188,26 +202,18 @@ if exist "%LEGACY_DATA%" (
 )
 
 REM --- 6. install -----------------------------------------------------------
-if "%LAYOUT%"=="flat" (
-    REM Mirror the whole plugin folder: also drops an old bin\ tree.
-    robocopy "%SRC%" "%DEST%" /MIR /R:1 /W:1 /NJH /NJS /NDL /NP /NFL >nul
-    if errorlevel 8 goto :copy_fail
-) else (
-    robocopy "%SRC%\data" "%DEST%\data" /MIR /R:1 /W:1 /NJH /NJS /NDL /NP /NFL >nul
-    if errorlevel 8 goto :copy_fail
-    if exist "%DEST%\bin" rmdir /s /q "%DEST%\bin"
+REM Mirror the whole plugin folder (drops files of older versions), then add
+REM the OBS 32 layout copy of the DLL.
+robocopy "%SRC%" "%DEST%" /MIR /R:1 /W:1 /NJH /NJS /NDL /NP /NFL >nul
+if errorlevel 8 goto :copy_fail
+if "%LAYOUT%"=="both" (
     robocopy "%SRC%" "%DEST%\bin\64bit" %PLUGIN%.dll %PLUGIN%.pdb /R:1 /W:1 /NJH /NJS /NDL /NP /NFL >nul
     if errorlevel 8 goto :copy_fail
-    if exist "%DEST%\%PLUGIN%.dll" del /f /q "%DEST%\%PLUGIN%.dll"
-    if exist "%DEST%\%PLUGIN%.pdb" del /f /q "%DEST%\%PLUGIN%.pdb"
 )
 
 REM Verify (robocopy's exit code alone can't be trusted).
-if "%LAYOUT%"=="flat" (
-    if not exist "%DEST%\%PLUGIN%.dll" goto :copy_fail
-) else (
-    if not exist "%DEST%\bin\64bit\%PLUGIN%.dll" goto :copy_fail
-)
+if not exist "%DEST%\%PLUGIN%.dll" goto :copy_fail
+if "%LAYOUT%"=="both" if not exist "%DEST%\bin\64bit\%PLUGIN%.dll" goto :copy_fail
 if not exist "%DEST%\data\locale\ja-JP.ini" goto :copy_fail
 
 echo.
@@ -220,12 +226,14 @@ if "%HAS_LEGACY%"=="1" (
     echo   Removed      : nothing ^(no old copies found^)
 )
 echo   Installed to : %DEST%
+echo   Log          : %LOGFILE%
 echo.
 echo   Start OBS and add "Font Effect Tools" from Add Source.
 echo ============================================================
 if "%NOPAUSE%"=="0" (
     powershell -NoProfile -Command "Add-Type -AssemblyName PresentationFramework; $m = [regex]::Unescape('Font Effect Tools \u306e\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u304c\u5b8c\u4e86\u3057\u307e\u3057\u305f\u3002\n\n\u30a4\u30f3\u30b9\u30c8\u30fc\u30eb\u5148:\n') + $env:DEST + [regex]::Unescape('\n\nOBS \u3092\u8d77\u52d5\u3057\u3066\u3001[\u30bd\u30fc\u30b9\u306e\u8ffd\u52a0] \u2192 [Font Effect Tools] \u304b\u3089\u4f7f\u3048\u307e\u3059\u3002'); [void][System.Windows.MessageBox]::Show($m, 'Font Effect Tools', 'OK', 'Information')" >nul 2>&1
 )
+call :write_log "INSTALL COMPLETE"
 goto :ok
 
 :copy_fail
@@ -238,6 +246,7 @@ endlocal
 exit /b 0
 
 :fail
+if not "%CHECK_ONLY%"=="1" call :write_log "INSTALL FAILED"
 echo.
 echo ============================================================
 echo   *** INSTALL FAILED ***  See the messages above.
@@ -248,3 +257,25 @@ if "%NOPAUSE%"=="0" (
 if "%NOPAUSE%"=="0" pause
 endlocal
 exit /b 1
+
+REM ---------------------------------------------------------------------------
+REM  :write_log RESULT - install-log.txt next to this file, for bug reports.
+REM ---------------------------------------------------------------------------
+:write_log
+> "%LOGFILE%" (
+    echo %PLUGIN% installer - %~1
+    echo date         : %DATE% %TIME%
+    echo windows      : %OS% %PROCESSOR_ARCHITECTURE%
+    echo package      : %SRC%
+    echo OBS folder   : %OBS_DIR%  ^(from %OBS_FROM%^)
+    echo OBS version  : %OBS_VERSION%  portable=%PORTABLE%
+    echo install to   : %DEST%  ^(layout %LAYOUT%^)
+    echo.
+    echo --- plugin files now present ---
+) 2>nul
+if not exist "%LOGFILE%" exit /b 0
+for %%D in ("%ProgramData%\obs-studio\plugins" "%OBS_DIR%\plugins") do if exist "%%~D\" (
+    for /d %%P in ("%%~D\*") do for %%F in ("%%~P\*.dll" "%%~P\bin\64bit\*.dll") do echo %%~fF>> "%LOGFILE%"
+)
+if exist "%OBS_DIR%\obs-plugins\64bit\" for %%F in ("%OBS_DIR%\obs-plugins\64bit\*.dll") do echo %%~fF>> "%LOGFILE%"
+exit /b 0
